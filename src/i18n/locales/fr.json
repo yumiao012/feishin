@@ -243,7 +243,7 @@
             "artists": "$t(entity.artist_other)",
             "albumArtists": "$t(entity.albumArtist_other)",
             "shared": "partagé $t(entity.playlist_other)",
-            "myLibrary": "ma bibliothèque"
+            "myLibrary": "Bibliothèque"
         },
         "fullscreenPlayer": {
             "config": {
@@ -283,10 +283,10 @@
             "privateModeOn": "activer le mode privé"
         },
         "home": {
-            "mostPlayed": "plus joués",
-            "newlyAdded": "versions récemment ajoutés",
-            "explore": "explorer depuis votre bibliothèque",
-            "recentlyPlayed": "récemment joué",
+            "mostPlayed": "Les plus joués",
+            "newlyAdded": "Ajoutés récemment",
+            "explore": "explorer depuis la bibliothèque",
+            "recentlyPlayed": "Joués récemment",
             "title": "$t(common.home)"
         },
         "albumDetail": {
@@ -331,7 +331,9 @@
             "showDetails": "obtenir des informations",
             "download": "télécharger",
             "playShuffled": "$t(player.shuffle)",
-            "moveToNext": "$t(action.moveToNext)"
+            "moveToNext": "$t(action.moveToNext)",
+            "goToAlbumArtist": "aller à l'$t(entity.albumArtist_one)",
+            "goToAlbum": "aller à l'$t(entity.album_one)"
         },
         "albumArtistList": {
             "title": "$t(entity.albumArtist_other)"
@@ -461,13 +463,13 @@
         "mpvExecutablePath": "chemin de l'exécutable mpv",
         "hotkey_rate2": "noter 2 étoiles",
         "playButtonBehavior_description": "définit le comportement par défaut du bouton Jouer/Pause, lors de l'ajout de titres à la file d'attente",
-        "minimumScrobblePercentage_description": "le pourcentage minimum de la chanson qui doit être joué avant qu'elle ne soit scrobbleée",
+        "minimumScrobblePercentage_description": "le pourcentage minimum de la chanson qui doit être joué avant qu'elle ne soit scrobblée",
         "exitToTray": "quitter vers la barre des tâches",
         "hotkey_rate4": "noter 4 étoiles",
         "enableRemote": "activer le serveur de contrôle à distance",
         "showSkipButton_description": "affiche ou cache les boutons suivants et précédents de la barre de lecture",
         "savePlayQueue": "sauvegarder la liste de lecture",
-        "minimumScrobbleSeconds_description": "la durée minimale en secondes de la chanson qui doit être jouée avant qu'elle ne soit scrobbleée",
+        "minimumScrobbleSeconds_description": "la durée minimale en secondes de la chanson qui doit être jouée avant qu'elle ne soit scrobblée",
         "fontType_description": "police intégré vous permet de sélectionner une des polices fourni par Feishin. Police système vous permet de sélectionner une des polices fourni par votre système d'éxploitation. personnalisé vous permet de fournir votre propre police",
         "playButtonBehavior": "comportement du bouton play",
         "playbackStyle_optionNormal": "normale",
@@ -499,7 +501,7 @@
         "sidebarCollapsedNavigation_description": "affiche ou cache la navigation dans la barre latérale réduite",
         "sidebarConfiguration": "configuration de la barre latérale",
         "sidebarConfiguration_description": "sélectionnez les éléments et l'ordre dans lequel ils seront affichés dans la barre latérale",
-        "sidebarPlaylistList": "liste de listes de lecture de la barre latérale",
+        "sidebarPlaylistList": "liste des listes de lecture de la barre latérale",
         "sidebarCollapsedNavigation": "navigation de la barre latéral (réduite)",
         "skipDuration": "durée de l'avance rapide",
         "sidePlayQueueStyle_optionAttached": "attaché",
@@ -546,7 +548,7 @@
         "clearQueryCache": "vide le cache de feishin",
         "clearCache": "vider le cache navigateur",
         "buttonSize_description": "la taille des boutons de la barre de lecture",
-        "clearQueryCache_description": "un 'soft clear' de Feishin. Cela actualisera les liste de lecture, les métadonnées des titres, et réinitialisera les paroles enregistrées. Les paramètres, identifiants du serveur et images mises en cache seront conservés",
+        "clearQueryCache_description": "un 'soft clear' de Feishin. cela actualisera les liste de lecture, les métadonnées des titres, et réinitialisera les paroles enregistrées. les paramètres, identifiants du serveur et images mises en cache seront conservés",
         "clearCache_description": "un 'hard clear' de feishin. en plus de vider le cache de feishin, vide le cache du navigateur (images sauvegardées et autres ressources). les identifiants serveurs et paramètres sont conservés",
         "buttonSize": "taille des boutons du lecteur",
         "clearCacheSuccess": "le cache a été vidé",
@@ -627,7 +629,10 @@
         "discordDisplayType": "type d'affichage du status {{discord}}",
         "discordDisplayType_description": "change ce que vous écoutez dans votre statut",
         "discordDisplayType_songname": "nom du morceau",
-        "discordDisplayType_artistname": "nom(s) d’artiste"
+        "discordDisplayType_artistname": "nom(s) d’artiste",
+        "hotkey_navigateHome": "aller à l'accueil",
+        "preventSleepOnPlayback_description": "Empêche la mise en veille du lecteur lorsque la musique est en cours de lecture",
+        "preventSleepOnPlayback": "Empêche la mise en veille lors de la lecture"
     },
     "form": {
         "deletePlaylist": {
@@ -655,7 +660,7 @@
             "input_playlists": "$t(entity.playlist_other)"
         },
         "createPlaylist": {
-            "title": "créer $t(entity.playlist_one)",
+            "title": "créer une $t(entity.playlist_one)",
             "input_public": "publique",
             "success": "$t(entity.playlist_one) créée avec succès",
             "input_description": "$t(common.description)",
