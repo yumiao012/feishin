@@ -8,7 +8,9 @@ import { Platform } from '/@/shared/types/types';
 export interface AppSlice extends AppState {
     actions: {
         setAppStore: (data: Partial<AppSlice>) => void;
+        setPageSidebar: (key: string, value: boolean) => void;
         setPrivateMode: (enabled: boolean) => void;
+        setShowTimeRemaining: (enabled: boolean) => void;
         setSideBar: (options: Partial<SidebarProps>) => void;
         setTitleBar: (options: Partial<TitlebarProps>) => void;
     };
@@ -17,8 +19,10 @@ export interface AppSlice extends AppState {
 export interface AppState {
     commandPalette: CommandPaletteProps;
     isReorderingQueue: boolean;
+    pageSidebar: Record<string, boolean>;
     platform: Platform;
     privateMode: boolean;
+    showTimeRemaining: boolean;
     sidebar: SidebarProps;
     titlebar: TitlebarProps;
 }
@@ -52,9 +56,23 @@ export const useAppStore = createWithEqualityFn<AppSlice>()(
                     setAppStore: (data) => {
                         set({ ...get(), ...data });
                     },
+                    setPageSidebar: (key, value) => {
+                        set((state) => {
+                            if (value) {
+                                state.pageSidebar[key] = value;
+                            } else {
+                                delete state.pageSidebar[key];
+                            }
+                        });
+                    },
                     setPrivateMode: (privateMode) => {
                         set((state) => {
                             state.privateMode = privateMode;
+                        });
+                    },
+                    setShowTimeRemaining: (showTimeRemaining) => {
+                        set((state) => {
+                            state.showTimeRemaining = showTimeRemaining;
                         });
                     },
                     setSideBar: (options) => {
@@ -87,15 +105,17 @@ export const useAppStore = createWithEqualityFn<AppSlice>()(
                     },
                 },
                 isReorderingQueue: false,
+                pageSidebar: {},
                 platform: Platform.WINDOWS,
                 privateMode: false,
+                showTimeRemaining: false,
                 sidebar: {
                     collapsed: false,
                     expanded: [],
                     image: false,
                     leftWidth: '400px',
                     rightExpanded: false,
-                    rightWidth: '400px',
+                    rightWidth: '600px',
                 },
                 titlebar: {
                     backgroundColor: '#000000',
@@ -108,8 +128,15 @@ export const useAppStore = createWithEqualityFn<AppSlice>()(
             merge: (persistedState, currentState) => {
                 return merge(currentState, persistedState);
             },
+            migrate: (persistedState, version) => {
+                if (version <= 2) {
+                    return {} as AppState;
+                }
+
+                return persistedState;
+            },
             name: 'store_app',
-            version: 2,
+            version: 3,
         },
     ),
 );
@@ -125,3 +152,14 @@ export const useSetTitlebar = () => useAppStore((state) => state.actions.setTitl
 export const useTitlebarStore = () => useAppStore((state) => state.titlebar);
 
 export const useCommandPalette = () => useAppStore((state) => state.commandPalette);
+
+export const usePageSidebar = (key: string): [boolean, (value: boolean) => void] => {
+    const isOpen = useAppStore((state) => state.pageSidebar[key] ?? false);
+    const setPageSidebar = useAppStore((state) => state.actions.setPageSidebar);
+
+    const setIsOpen = (value: boolean) => {
+        setPageSidebar(key, value);
+    };
+
+    return [isOpen, setIsOpen];
+};

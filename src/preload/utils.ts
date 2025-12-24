@@ -2,24 +2,12 @@ import { ipcRenderer, IpcRendererEvent } from 'electron';
 
 import { isLinux, isMacOS, isWindows } from '../main/utils';
 
-const saveQueue = (data: Record<string, any>) => {
-    ipcRenderer.send('player-save-queue', data);
-};
-
-const restoreQueue = () => {
-    ipcRenderer.send('player-restore-queue');
-};
-
 const openItem = async (path: string) => {
     return ipcRenderer.invoke('open-item', path);
 };
 
-const onSaveQueue = (cb: (event: IpcRendererEvent) => void) => {
-    ipcRenderer.on('renderer-save-queue', cb);
-};
-
-const onRestoreQueue = (cb: (event: IpcRendererEvent, data: Partial<any>) => void) => {
-    ipcRenderer.on('renderer-restore-queue', cb);
+const openApplicationDirectory = async () => {
+    return ipcRenderer.invoke('open-application-directory');
 };
 
 const playerErrorListener = (cb: (event: IpcRendererEvent, data: { code: number }) => void) => {
@@ -58,12 +46,9 @@ export const utils = {
     isWindows,
     logger,
     mainMessageListener,
-    onRestoreQueue,
-    onSaveQueue,
+    openApplicationDirectory,
     openItem,
     playerErrorListener,
-    restoreQueue,
-    saveQueue,
 };
 
 export type Utils = typeof utils;
