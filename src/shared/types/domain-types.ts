@@ -18,7 +18,7 @@ import {
     NDUserListSort,
 } from '/@/shared/api/navidrome/navidrome-types';
 import { ServerFeatures } from '/@/shared/types/features-types';
-import { PlayerRepeat, PlayerShuffle, PlayerStatus, PlayerStyle } from '/@/shared/types/types';
+import { PlayerStatus } from '/@/shared/types/types';
 
 export enum LibraryItem {
     ALBUM = 'album',
@@ -57,32 +57,32 @@ export type AnyLibraryItems =
 export interface PlayerData {
     currentSong: QueueSong | undefined;
     index: number;
-    muted: boolean;
     nextSong: QueueSong | undefined;
     num: 1 | 2;
     player1: QueueSong | undefined;
     player2: QueueSong | undefined;
     previousSong: QueueSong | undefined;
-    queue: QueueData;
     queueLength: number;
-    repeat: PlayerRepeat;
-    shuffle: PlayerShuffle;
-    speed: number;
     status: PlayerStatus;
-    transitionType: PlayerStyle;
-    volume: number;
 }
 
 export interface QueueData {
     default: string[];
-    priority: string[];
     shuffled: number[];
     songs: Record<string, QueueSong>;
 }
 
 export type QueueSong = Song & {
+    _contextPlaylistId?: null | string;
     _uniqueId: string;
 };
+
+export interface SavedCollection {
+    filterQueryString: string;
+    id: string;
+    name: string;
+    type: LibraryItem.ALBUM | LibraryItem.SONG;
+}
 
 export type ServerListItem = {
     features?: ServerFeatures;
@@ -91,6 +91,8 @@ export type ServerListItem = {
     musicFolderId?: string[];
     name: string;
     preferInstantMix?: boolean;
+    preferRemoteUrl?: boolean;
+    remoteUrl?: string;
     savePassword?: boolean;
     type: ServerType;
     url: string;
@@ -153,7 +155,9 @@ export enum ExternalType {
 }
 
 export enum GenreListSort {
+    ALBUM_COUNT = 'albumCount',
     NAME = 'name',
+    SONG_COUNT = 'songCount',
 }
 
 export enum ImageType {
@@ -164,14 +168,16 @@ export enum ImageType {
 }
 
 export enum TagListSort {
-    TAG_VALUE = 'tagValue',
+    ALBUM_COUNT = 'albumCount',
+    NAME = 'name',
+    SONG_COUNT = 'songCount',
 }
 
 export type Album = {
     _itemType: LibraryItem.ALBUM;
     _serverId: string;
     _serverType: ServerType;
-    albumArtist: string;
+    albumArtistName: string;
     albumArtists: RelatedArtist[];
     artists: RelatedArtist[];
     comment: null | string;
@@ -185,18 +191,23 @@ export type Album = {
     isCompilation: boolean | null;
     lastPlayedAt: null | string;
     mbzId: null | string;
+    mbzReleaseGroupId: null | string;
     name: string;
-    originalDate: null | string;
+    originalDate: null | PartialIsoDateString;
+    originalYear: number;
     participants: null | Record<string, RelatedArtist[]>;
     playCount: null | number;
     recordLabels: string[];
-    releaseDate: null | string;
+    releaseDate: null | PartialIsoDateString;
+    releaseType: null | string;
     releaseTypes: string[];
     releaseYear: null | number;
     size: null | number;
     songCount: null | number;
     songs?: Song[];
+    sortName: string;
     tags: null | Record<string, string[]>;
+    trackYearRange: null | { max: number; min: number };
     updatedAt: string;
     userFavorite: boolean;
     userRating: null | number;
@@ -220,19 +231,13 @@ export type AlbumArtist = {
     playCount: null | number;
     similarArtists: null | RelatedArtist[];
     songCount: null | number;
+    uploadedImage?: string;
     userFavorite: boolean;
     userRating: null | number;
 };
 
-export type Artist = {
+export type Artist = Omit<AlbumArtist, '_itemType'> & {
     _itemType: LibraryItem.ARTIST;
-    _serverId: string;
-    _serverType: ServerType;
-    biography: null | string;
-    createdAt: string;
-    id: string;
-    name: string;
-    updatedAt: string;
 };
 
 export type AuthenticationResponse = {
@@ -268,6 +273,8 @@ export type Folder = {
         songs: Song[];
     };
     id: string;
+    imageId?: null | string;
+    imageUrl?: null | string;
     name: string;
     parentId?: string;
 };
@@ -326,6 +333,8 @@ export type MusicFolder = {
 
 export type MusicFoldersResponse = MusicFolder[];
 
+export type PartialIsoDateString = string;
+
 export type Playlist = {
     _itemType: LibraryItem.PLAYLIST;
     _serverId: string;
@@ -340,10 +349,11 @@ export type Playlist = {
     owner: null | string;
     ownerId: null | string;
     public: boolean | null;
-    rules?: null | Record<string, any>;
+    rules?: null | PlaylistRules;
     size: null | number;
     songCount: null | number;
     sync?: boolean | null;
+    uploadedImage?: string;
 };
 
 export type RelatedAlbumArtist = {
@@ -356,6 +366,8 @@ export type RelatedArtist = {
     imageId: null | string;
     imageUrl: null | string;
     name: string;
+    userFavorite: boolean;
+    userRating: null | number;
 };
 
 export type Song = {
@@ -363,6 +375,7 @@ export type Song = {
     _serverId: string;
     _serverType: ServerType;
     album: null | string;
+    albumArtistName: string;
     albumArtists: RelatedArtist[];
     albumId: string;
     artistName: string;
@@ -375,6 +388,7 @@ export type Song = {
     compilation: boolean | null;
     container: null | string;
     createdAt: string;
+    date: null | PartialIsoDateString;
     discNumber: number;
     discSubtitle: null | string;
     duration: number;
@@ -394,40 +408,54 @@ export type Song = {
     peak: GainInfo | null;
     playCount: number;
     playlistItemId?: string;
-    releaseDate: null | string;
+    releaseDate: null | PartialIsoDateString;
     releaseYear: null | number;
     sampleRate: null | number;
     size: number;
+    sortName: string;
     tags: null | Record<string, string[]>;
     trackNumber: number;
+    trackSubtitle: null | string;
     updatedAt: string;
     userFavorite: boolean;
     userRating: null | number;
+    year: null | number;
 };
+
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+type ApiContext = {};
 
 type BaseEndpointArgs = {
     apiClientProps: {
+        forceRemoteUrl?: boolean;
         server?: null | ServerListItemWithCredential;
         serverId: string;
         signal?: AbortSignal;
     };
+    context?: ApiContext;
 };
 
 type GenreListSortMap = {
     jellyfin: Record<GenreListSort, JFGenreListSort | undefined>;
-    navidrome: Record<GenreListSort, NDGenreListSort | undefined>;
-    subsonic: Record<UserListSort, undefined>;
+    navidrome: Record<GenreListSort, NDGenreListSort>;
+    subsonic: Record<GenreListSort, undefined>;
 };
 
 export const genreListSortMap: GenreListSortMap = {
     jellyfin: {
+        albumCount: undefined,
         name: JFGenreListSort.NAME,
+        songCount: undefined,
     },
     navidrome: {
+        albumCount: NDGenreListSort.NAME,
         name: NDGenreListSort.NAME,
+        songCount: NDGenreListSort.NAME,
     },
     subsonic: {
+        albumCount: undefined,
         name: undefined,
+        songCount: undefined,
     },
 };
 
@@ -439,15 +467,23 @@ type TagListSortMap = {
 
 export const tagListSortMap: TagListSortMap = {
     jellyfin: {
-        tagValue: undefined,
+        albumCount: undefined,
+        name: undefined,
+        songCount: undefined,
     },
     navidrome: {
-        tagValue: NDTagListSort.TAG_VALUE,
+        albumCount: NDTagListSort.ALBUM_COUNT,
+        name: NDTagListSort.TAG_VALUE,
+        songCount: NDTagListSort.SONG_COUNT,
     },
     subsonic: {
-        tagValue: undefined,
+        albumCount: undefined,
+        name: undefined,
+        songCount: undefined,
     },
 };
+
+export const SortKeyRandom = 'random';
 
 export enum AlbumListSort {
     ALBUM_ARTIST = 'albumArtist',
@@ -457,14 +493,16 @@ export enum AlbumListSort {
     DURATION = 'duration',
     EXPLICIT_STATUS = 'explicitStatus',
     FAVORITED = 'favorited',
+    ID = 'id',
     NAME = 'name',
     PLAY_COUNT = 'playCount',
-    RANDOM = 'random',
+    RANDOM = SortKeyRandom,
     RATING = 'rating',
     RECENTLY_ADDED = 'recentlyAdded',
     RECENTLY_PLAYED = 'recentlyPlayed',
     RELEASE_DATE = 'releaseDate',
     SONG_COUNT = 'songCount',
+    SORT_NAME = 'sortName',
     YEAR = 'year',
 }
 
@@ -489,7 +527,7 @@ export interface AlbumListQuery extends AlbumListNavidromeQuery, BaseQuery<Album
 // Album List
 export type AlbumListResponse = BasePaginatedResponse<Album[]>;
 
-export type ListCountQuery<TQuery> = Omit<TQuery, 'limit' | 'startIndex'>;
+export type ListCountQuery<TQuery> = Omit<TQuery, 'startIndex'>;
 
 interface AlbumListNavidromeQuery {
     hasRating?: boolean;
@@ -511,6 +549,7 @@ export const albumListSortMap: AlbumListSortMap = {
         duration: undefined,
         explicitStatus: undefined,
         favorited: undefined,
+        id: undefined,
         name: JFAlbumListSort.NAME,
         playCount: JFAlbumListSort.PLAY_COUNT,
         random: JFAlbumListSort.RANDOM,
@@ -519,6 +558,7 @@ export const albumListSortMap: AlbumListSortMap = {
         recentlyPlayed: undefined,
         releaseDate: JFAlbumListSort.RELEASE_DATE,
         songCount: undefined,
+        sortName: JFAlbumListSort.NAME,
         year: undefined,
     },
     navidrome: {
@@ -529,6 +569,7 @@ export const albumListSortMap: AlbumListSortMap = {
         duration: NDAlbumListSort.DURATION,
         explicitStatus: NDAlbumListSort.EXPLICIT_STATUS,
         favorited: NDAlbumListSort.STARRED,
+        id: undefined,
         name: NDAlbumListSort.NAME,
         playCount: NDAlbumListSort.PLAY_COUNT,
         random: NDAlbumListSort.RANDOM,
@@ -538,6 +579,7 @@ export const albumListSortMap: AlbumListSortMap = {
         // Recent versions of Navidrome support release date, but fallback to year for now
         releaseDate: NDAlbumListSort.YEAR,
         songCount: NDAlbumListSort.SONG_COUNT,
+        sortName: NDAlbumListSort.NAME,
         year: NDAlbumListSort.YEAR,
     },
     subsonic: {
@@ -548,6 +590,7 @@ export const albumListSortMap: AlbumListSortMap = {
         duration: undefined,
         explicitStatus: undefined,
         favorited: undefined,
+        id: undefined,
         name: undefined,
         playCount: undefined,
         random: undefined,
@@ -556,6 +599,7 @@ export const albumListSortMap: AlbumListSortMap = {
         recentlyPlayed: undefined,
         releaseDate: undefined,
         songCount: undefined,
+        sortName: undefined,
         year: undefined,
     },
 };
@@ -574,11 +618,13 @@ export enum SongListSort {
     ID = 'id',
     NAME = 'name',
     PLAY_COUNT = 'playCount',
-    RANDOM = 'random',
+    RANDOM = SortKeyRandom,
     RATING = 'rating',
     RECENTLY_ADDED = 'recentlyAdded',
     RECENTLY_PLAYED = 'recentlyPlayed',
     RELEASE_DATE = 'releaseDate',
+    RELEASE_YEAR = 'releaseYear',
+    SORT_NAME = 'sortName',
     YEAR = 'year',
 }
 
@@ -594,6 +640,8 @@ export type AlbumInfo = {
     notes: null | string;
 };
 
+export type SongIdListResponse = BasePaginatedResponse<string[]>;
+
 export type SongListArgs = BaseEndpointArgs & { query: SongListQuery };
 
 export type SongListCountArgs = BaseEndpointArgs & { query: ListCountQuery<SongListQuery> };
@@ -605,6 +653,7 @@ export interface SongListQuery extends BaseQuery<SongListSort> {
     artistIds?: string[];
     favorite?: boolean;
     genreIds?: string[];
+    hasRating?: boolean;
     imageSize?: number;
     limit?: number;
     maxYear?: number;
@@ -643,6 +692,8 @@ export const songListSortMap: SongListSortMap = {
         recentlyAdded: JFSongListSort.RECENTLY_ADDED,
         recentlyPlayed: JFSongListSort.RECENTLY_PLAYED,
         releaseDate: JFSongListSort.RELEASE_DATE,
+        releaseYear: undefined,
+        sortName: JFSongListSort.NAME,
         year: undefined,
     },
     navidrome: {
@@ -664,6 +715,8 @@ export const songListSortMap: SongListSortMap = {
         recentlyAdded: NDSongListSort.RECENTLY_ADDED,
         recentlyPlayed: NDSongListSort.PLAY_DATE,
         releaseDate: undefined,
+        releaseYear: NDSongListSort.RELEASE_YEAR,
+        sortName: NDSongListSort.TITLE,
         year: NDSongListSort.YEAR,
     },
     subsonic: {
@@ -685,6 +738,8 @@ export const songListSortMap: SongListSortMap = {
         recentlyAdded: undefined,
         recentlyPlayed: undefined,
         releaseDate: undefined,
+        releaseYear: undefined,
+        sortName: undefined,
         year: undefined,
     },
 };
@@ -696,7 +751,7 @@ export enum AlbumArtistListSort {
     FAVORITED = 'favorited',
     NAME = 'name',
     PLAY_COUNT = 'playCount',
-    RANDOM = 'random',
+    RANDOM = SortKeyRandom,
     RATING = 'rating',
     RECENTLY_ADDED = 'recentlyAdded',
     RELEASE_DATE = 'releaseDate',
@@ -785,7 +840,7 @@ export enum ArtistListSort {
     FAVORITED = 'favorited',
     NAME = 'name',
     PLAY_COUNT = 'playCount',
-    RANDOM = 'random',
+    RANDOM = SortKeyRandom,
     RATING = 'rating',
     RECENTLY_ADDED = 'recentlyAdded',
     RELEASE_DATE = 'releaseDate',
@@ -797,6 +852,16 @@ export type AlbumArtistDetailArgs = BaseEndpointArgs & { query: AlbumArtistDetai
 export type AlbumArtistDetailQuery = { id: string };
 
 export type AlbumArtistDetailResponse = AlbumArtist | null;
+
+export type AlbumArtistInfoArgs = BaseEndpointArgs & { query: AlbumArtistInfoQuery };
+
+export type AlbumArtistInfoQuery = { id: string; limit?: number };
+
+export type AlbumArtistInfoResponse = {
+    biography?: null | string;
+    imageUrl?: null | string;
+    similarArtists: null | RelatedArtist[];
+};
 
 export type ArtistListArgs = BaseEndpointArgs & { query: ArtistListQuery };
 
@@ -913,16 +978,36 @@ export type CreatePlaylistBody = {
     name: string;
     ownerId?: string;
     public?: boolean;
-    queryBuilderRules?: Record<string, any>;
+    queryBuilderRules?: PlaylistRules;
     sync?: boolean;
 };
 
 // Create Playlist
 export type CreatePlaylistResponse = undefined | { id: string };
 
+export type DeleteArtistImageArgs = BaseEndpointArgs & {
+    query: DeleteArtistImageQuery;
+};
+
+export type DeleteArtistImageQuery = {
+    id: string;
+};
+
+export type DeleteArtistImageResponse = boolean;
+
 export type DeleteInternetRadioStationArgs = BaseEndpointArgs & {
     query: DeleteInternetRadioStationQuery;
 };
+
+export type DeleteInternetRadioStationImageArgs = BaseEndpointArgs & {
+    query: DeleteInternetRadioStationImageQuery;
+};
+
+export type DeleteInternetRadioStationImageQuery = {
+    id: string;
+};
+
+export type DeleteInternetRadioStationImageResponse = boolean;
 
 export type DeleteInternetRadioStationQuery = {
     id: string;
@@ -933,6 +1018,16 @@ export type DeleteInternetRadioStationResponse = null | undefined;
 export type DeletePlaylistArgs = BaseEndpointArgs & {
     query: DeletePlaylistQuery;
 };
+
+export type DeletePlaylistImageArgs = BaseEndpointArgs & {
+    query: DeletePlaylistImageQuery;
+};
+
+export type DeletePlaylistImageQuery = {
+    id: string;
+};
+
+export type DeletePlaylistImageResponse = boolean;
 
 export type DeletePlaylistQuery = { id: string };
 
@@ -954,10 +1049,13 @@ export type GetInternetRadioStationsArgs = BaseEndpointArgs;
 export type GetInternetRadioStationsResponse = InternetRadioStation[];
 
 export type InternetRadioStation = {
-    homepageUrl?: null | string;
+    homepageUrl: null | string;
     id: string;
+    imageId?: null | string;
+    imageUrl?: null | string;
     name: string;
     streamUrl: string;
+    uploadedImage?: null | string;
 };
 
 export type PlaylistListArgs = BaseEndpointArgs & { query: PlaylistListQuery };
@@ -974,6 +1072,12 @@ export interface PlaylistListQuery extends BaseQuery<PlaylistListSort> {
 
 // Playlist List
 export type PlaylistListResponse = BasePaginatedResponse<Playlist[]>;
+
+export type PlaylistRules = Record<string, any> & {
+    limit?: number;
+    limitPercent?: number;
+    sort?: string;
+};
 
 export type RatingQuery = {
     id: string[];
@@ -1019,13 +1123,17 @@ export type ShareItemArgs = BaseEndpointArgs & { body: ShareItemBody };
 export type ShareItemBody = {
     description: string;
     downloadable: boolean;
-    expires: number;
+    expires?: number;
     resourceIds: string;
     resourceType: string;
 };
 
 // Sharing
 export type ShareItemResponse = undefined | { id: string };
+
+export type StartLibraryScanArgs = BaseEndpointArgs;
+
+export type StartLibraryScanResponse = null;
 
 export type UpdateInternetRadioStationArgs = BaseEndpointArgs & {
     body: UpdateInternetRadioStationBody;
@@ -1052,11 +1160,10 @@ export type UpdatePlaylistArgs = BaseEndpointArgs & {
 export type UpdatePlaylistBody = {
     _custom?: Record<string, any>;
     comment?: string;
-    genres?: Genre[];
     name: string;
     ownerId?: string;
     public?: boolean;
-    queryBuilderRules?: Record<string, any>;
+    queryBuilderRules?: PlaylistRules;
     sync?: boolean;
 };
 
@@ -1066,6 +1173,51 @@ export type UpdatePlaylistQuery = {
 
 // Update Playlist
 export type UpdatePlaylistResponse = null | undefined;
+
+export type UploadArtistImageArgs = BaseEndpointArgs & {
+    body: UploadArtistImageBody;
+    query: UploadArtistImageQuery;
+};
+
+export type UploadArtistImageBody = {
+    image: Uint8Array;
+};
+
+export type UploadArtistImageQuery = {
+    id: string;
+};
+
+export type UploadArtistImageResponse = boolean;
+
+export type UploadInternetRadioStationImageArgs = BaseEndpointArgs & {
+    body: UploadInternetRadioStationImageBody;
+    query: UploadInternetRadioStationImageQuery;
+};
+
+export type UploadInternetRadioStationImageBody = {
+    image: Uint8Array;
+};
+
+export type UploadInternetRadioStationImageQuery = {
+    id: string;
+};
+
+export type UploadInternetRadioStationImageResponse = boolean;
+
+export type UploadPlaylistImageArgs = BaseEndpointArgs & {
+    body: UploadPlaylistImageBody;
+    query: UploadPlaylistImageQuery;
+};
+
+export type UploadPlaylistImageBody = {
+    image: Uint8Array;
+};
+
+export type UploadPlaylistImageQuery = {
+    id: string;
+};
+
+export type UploadPlaylistImageResponse = boolean;
 
 type PlaylistListSortMap = {
     jellyfin: Record<PlaylistListSort, JFPlaylistListSort | undefined>;
@@ -1184,12 +1336,27 @@ export type ArtistInfoQuery = {
     musicFolderId?: string | string[];
 };
 
+export type FavoriteSongListArgs = BaseEndpointArgs & { query: FavoriteSongListQuery };
+
+export type FavoriteSongListQuery = {
+    artistId: string;
+    limit?: number;
+    type?: 'favorite' | 'rating';
+};
+
+// Favorite Songs List
+export type FavoriteSongListResponse = BasePaginatedResponse<Song[]>;
+
 export type FullLyricsMetadata = Omit<InternetProviderLyricResponse, 'id' | 'lyrics' | 'source'> & {
     lyrics: LyricsResponse;
     offsetMs?: number;
     remote: boolean;
     source: string;
 };
+
+export type GetScanStatusArgs = BaseEndpointArgs;
+
+export type GetScanStatusResponse = ScanStatus;
 
 export type InternetProviderLyricResponse = {
     artist: string;
@@ -1202,9 +1369,16 @@ export type InternetProviderLyricResponse = {
 export type InternetProviderLyricSearchResponse = {
     artist: string;
     id: string;
+    isSync: boolean | null;
     name: string;
     score?: number;
     source: LyricSource;
+};
+
+export type LyricAgent = {
+    id: string;
+    name?: string;
+    role: 'bg' | 'group' | 'main' | 'voice';
 };
 
 export type LyricOverride = Omit<InternetProviderLyricResponse, 'lyrics'>;
@@ -1213,11 +1387,13 @@ export type LyricsArgs = BaseEndpointArgs & {
     query: LyricsQuery;
 };
 
+export type LyricsKind = 'main' | 'pronunciation' | 'translation';
+
 export type LyricsQuery = {
     songId: string;
 };
 
-export type LyricsResponse = string | SynchronizedLyricsArray;
+export type LyricsResponse = string | SynchronizedLyrics;
 
 export type RandomSongListArgs = BaseEndpointArgs & {
     query: RandomSongListQuery;
@@ -1234,13 +1410,27 @@ export type RandomSongListQuery = {
 
 export type RandomSongListResponse = SongListResponse;
 
+export type RefreshItemsArgs = BaseEndpointArgs & { query: { ids: string[] } };
+
+export type RefreshItemsResponse = null;
+
+export type ScanStatus = {
+    count: number;
+    folderCount: number;
+    lastScan?: string;
+    scanning: boolean;
+};
+
 export type ScrobbleArgs = BaseEndpointArgs & {
     query: ScrobbleQuery;
 };
 
 export type ScrobbleQuery = {
-    event?: 'pause' | 'start' | 'timeupdate' | 'unpause';
+    albumId?: string;
+    event?: 'pause' | 'start' | 'stop' | 'unpause';
     id: string;
+    mediaType: 'podcast' | 'song';
+    playbackRate: number;
     position?: number;
     submission: boolean;
 };
@@ -1290,7 +1480,34 @@ export type SearchSongsQuery = {
     songStartIndex?: number;
 };
 
-export type SynchronizedLyricsArray = Array<[number, string]>;
+export type SyncedCueLine = {
+    agentId?: string;
+    endMs: number;
+    index: number;
+    startMs: number;
+    value: string;
+    words: SyncedWordCue[];
+};
+
+export type SyncedWordCue = {
+    endMs: number;
+    startMs: number;
+    text: string;
+};
+
+export type SynchronizedLyricLine = {
+    cueLines?: SyncedCueLine[];
+    startMs: number;
+    text: string;
+};
+
+export type SynchronizedLyrics = SynchronizedLyricLine[];
+
+/** @deprecated Use SynchronizedLyrics instead */
+export type SynchronizedLyricsArray = SynchronizedLyrics;
+
+/** @deprecated Use SynchronizedLyrics instead */
+export type SynchronizedLyricsLineTuple = [number, string];
 
 export type TopSongListArgs = BaseEndpointArgs & { query: TopSongListQuery };
 
@@ -1298,6 +1515,7 @@ export type TopSongListQuery = {
     artist: string;
     artistId: string;
     limit?: number;
+    type?: 'community' | 'personal';
 };
 
 // Top Songs List
@@ -1311,7 +1529,17 @@ export enum LyricSource {
     GENIUS = 'Genius',
     LRCLIB = 'lrclib.net',
     NETEASE = 'NetEase',
+    SIMPMUSIC = 'SimpMusic',
 }
+
+export type AlbumRadioArgs = BaseEndpointArgs & {
+    query: AlbumRadioQuery;
+};
+
+export type AlbumRadioQuery = {
+    albumId: string;
+    count?: number;
+};
 
 export type ArtistRadioArgs = BaseEndpointArgs & {
     query: ArtistRadioQuery;
@@ -1333,24 +1561,33 @@ export type ControllerEndpoint = {
         args: CreateInternetRadioStationArgs,
     ) => Promise<CreateInternetRadioStationResponse>;
     createPlaylist: (args: CreatePlaylistArgs) => Promise<CreatePlaylistResponse>;
+    deleteArtistImage?: (args: DeleteArtistImageArgs) => Promise<DeleteArtistImageResponse>;
     deleteFavorite: (args: FavoriteArgs) => Promise<FavoriteResponse>;
     deleteInternetRadioStation: (
         args: DeleteInternetRadioStationArgs,
     ) => Promise<DeleteInternetRadioStationResponse>;
+    deleteInternetRadioStationImage?: (
+        args: DeleteInternetRadioStationImageArgs,
+    ) => Promise<DeleteInternetRadioStationImageResponse>;
     deletePlaylist: (args: DeletePlaylistArgs) => Promise<DeletePlaylistResponse>;
+    deletePlaylistImage?: (args: DeletePlaylistImageArgs) => Promise<DeletePlaylistImageResponse>;
     getAlbumArtistDetail: (args: AlbumArtistDetailArgs) => Promise<AlbumArtistDetailResponse>;
+    getAlbumArtistInfo?: (args: AlbumArtistInfoArgs) => Promise<AlbumArtistInfoResponse | null>;
     getAlbumArtistList: (args: AlbumArtistListArgs) => Promise<AlbumArtistListResponse>;
     getAlbumArtistListCount: (args: AlbumArtistListCountArgs) => Promise<number>;
     getAlbumDetail: (args: AlbumDetailArgs) => Promise<AlbumDetailResponse>;
     getAlbumInfo?: (args: AlbumDetailArgs) => Promise<AlbumInfo>;
     getAlbumList: (args: AlbumListArgs) => Promise<AlbumListResponse>;
     getAlbumListCount: (args: AlbumListCountArgs) => Promise<number>;
+    getAlbumRadio: (args: AlbumRadioArgs) => Promise<Song[]>;
     getArtistList: (args: ArtistListArgs) => Promise<ArtistListResponse>;
     getArtistListCount: (args: ArtistListCountArgs) => Promise<number>;
     getArtistRadio: (args: ArtistRadioArgs) => Promise<Song[]>;
     getDownloadUrl: (args: DownloadArgs) => string;
+    getFavoriteSongs: (args: FavoriteSongListArgs) => Promise<FavoriteSongListResponse>;
     getFolder: (args: FolderArgs) => Promise<FolderResponse>;
     getGenreList: (args: GenreListArgs) => Promise<GenreListResponse>;
+    getImageRequest: (args: ImageArgs) => ImageRequest | null;
     getImageUrl: (args: ImageArgs) => null | string;
     getInternetRadioStations: (
         args: GetInternetRadioStationsArgs,
@@ -1360,34 +1597,44 @@ export type ControllerEndpoint = {
     getPlaylistDetail: (args: PlaylistDetailArgs) => Promise<PlaylistDetailResponse>;
     getPlaylistList: (args: PlaylistListArgs) => Promise<PlaylistListResponse>;
     getPlaylistListCount: (args: PlaylistListCountArgs) => Promise<number>;
+    getPlaylistSongIds: (args: PlaylistSongListArgs) => Promise<SongIdListResponse>;
     getPlaylistSongList: (args: PlaylistSongListArgs) => Promise<SongListResponse>;
     getPlayQueue: (args: GetQueueArgs) => Promise<GetQueueResponse>;
     getRandomSongList: (args: RandomSongListArgs) => Promise<SongListResponse>;
     getRoles: (args: BaseEndpointArgs) => Promise<Array<string | { label: string; value: string }>>;
+    getScanStatus: (args: GetScanStatusArgs) => Promise<GetScanStatusResponse>;
     getServerInfo: (args: ServerInfoArgs) => Promise<ServerInfo>;
     getSimilarSongs: (args: SimilarSongsArgs) => Promise<Song[]>;
     getSongDetail: (args: SongDetailArgs) => Promise<SongDetailResponse>;
     getSongList: (args: SongListArgs) => Promise<SongListResponse>;
     getSongListCount: (args: SongListCountArgs) => Promise<number>;
-    getStreamUrl: (args: StreamArgs) => string;
+    getStreamUrl: (args: StreamArgs) => Promise<string>;
     getStructuredLyrics?: (args: StructuredLyricsArgs) => Promise<StructuredLyric[]>;
     getTagList?: (args: TagListArgs) => Promise<TagListResponse>;
     getTopSongs: (args: TopSongListArgs) => Promise<TopSongListResponse>;
-    // getArtistInfo?: (args: any) => void;
     getUserInfo: (args: UserInfoArgs) => Promise<UserInfoResponse>;
     getUserList?: (args: UserListArgs) => Promise<UserListResponse>;
+    jukeboxControl?: (args: JukeboxControlArgs) => Promise<JukeboxControlResponse>;
     movePlaylistItem?: (args: MoveItemArgs) => Promise<void>;
+    refreshItems: (args: RefreshItemsArgs) => Promise<RefreshItemsResponse>;
     removeFromPlaylist: (args: RemoveFromPlaylistArgs) => Promise<RemoveFromPlaylistResponse>;
     replacePlaylist: (args: ReplacePlaylistArgs) => Promise<ReplacePlaylistResponse>;
     savePlayQueue: (args: SaveQueueArgs) => Promise<void>;
     scrobble: (args: ScrobbleArgs) => Promise<ScrobbleResponse>;
     search: (args: SearchArgs) => Promise<SearchResponse>;
+    setPlaylistSongs: (args: SetPlaylistSongsArgs) => Promise<SetPlaylistSongsResponse>;
     setRating?: (args: SetRatingArgs) => Promise<RatingResponse>;
     shareItem?: (args: ShareItemArgs) => Promise<ShareItemResponse>;
+    startLibraryScan: (args: StartLibraryScanArgs) => Promise<StartLibraryScanResponse>;
     updateInternetRadioStation: (
         args: UpdateInternetRadioStationArgs,
     ) => Promise<UpdateInternetRadioStationResponse>;
     updatePlaylist: (args: UpdatePlaylistArgs) => Promise<UpdatePlaylistResponse>;
+    uploadArtistImage?: (args: UploadArtistImageArgs) => Promise<UploadArtistImageResponse>;
+    uploadInternetRadioStationImage?: (
+        args: UploadInternetRadioStationImageArgs,
+    ) => Promise<UploadInternetRadioStationImageResponse>;
+    uploadPlaylistImage?: (args: UploadPlaylistImageArgs) => Promise<UploadPlaylistImageResponse>;
 };
 
 export type DownloadArgs = BaseEndpointArgs & {
@@ -1421,6 +1668,7 @@ export type GetQueueResponse = {
 };
 
 export type ImageArgs = BaseEndpointArgs & {
+    baseUrl?: string;
     query: ImageQuery;
 };
 
@@ -1428,6 +1676,13 @@ export type ImageQuery = {
     id: string;
     itemType: LibraryItem;
     size?: number;
+};
+
+export type ImageRequest = {
+    cacheKey: string;
+    credentials?: RequestCredentials;
+    headers?: Record<string, string>;
+    url: string;
 };
 
 export type InternalControllerEndpoint = {
@@ -1445,16 +1700,28 @@ export type InternalControllerEndpoint = {
     createPlaylist: (
         args: ReplaceApiClientProps<CreatePlaylistArgs>,
     ) => Promise<CreatePlaylistResponse>;
+    deleteArtistImage?: (
+        args: ReplaceApiClientProps<DeleteArtistImageArgs>,
+    ) => Promise<DeleteArtistImageResponse>;
     deleteFavorite: (args: ReplaceApiClientProps<FavoriteArgs>) => Promise<FavoriteResponse>;
     deleteInternetRadioStation: (
         args: ReplaceApiClientProps<DeleteInternetRadioStationArgs>,
     ) => Promise<DeleteInternetRadioStationResponse>;
+    deleteInternetRadioStationImage?: (
+        args: ReplaceApiClientProps<DeleteInternetRadioStationImageArgs>,
+    ) => Promise<DeleteInternetRadioStationImageResponse>;
     deletePlaylist: (
         args: ReplaceApiClientProps<DeletePlaylistArgs>,
     ) => Promise<DeletePlaylistResponse>;
+    deletePlaylistImage?: (
+        args: ReplaceApiClientProps<DeletePlaylistImageArgs>,
+    ) => Promise<DeletePlaylistImageResponse>;
     getAlbumArtistDetail: (
         args: ReplaceApiClientProps<AlbumArtistDetailArgs>,
     ) => Promise<AlbumArtistDetailResponse>;
+    getAlbumArtistInfo?: (
+        args: ReplaceApiClientProps<AlbumArtistInfoArgs>,
+    ) => Promise<AlbumArtistInfoResponse | null>;
     getAlbumArtistList: (
         args: ReplaceApiClientProps<AlbumArtistListArgs>,
     ) => Promise<AlbumArtistListResponse>;
@@ -1465,13 +1732,18 @@ export type InternalControllerEndpoint = {
     getAlbumInfo?: (args: ReplaceApiClientProps<AlbumDetailArgs>) => Promise<AlbumInfo>;
     getAlbumList: (args: ReplaceApiClientProps<AlbumListArgs>) => Promise<AlbumListResponse>;
     getAlbumListCount: (args: ReplaceApiClientProps<AlbumListCountArgs>) => Promise<number>;
+    getAlbumRadio: (args: ReplaceApiClientProps<AlbumRadioArgs>) => Promise<Song[]>;
     // getArtistInfo?: (args: any) => void;
     getArtistList: (args: ReplaceApiClientProps<ArtistListArgs>) => Promise<ArtistListResponse>;
     getArtistListCount: (args: ReplaceApiClientProps<ArtistListCountArgs>) => Promise<number>;
     getArtistRadio: (args: ReplaceApiClientProps<ArtistRadioArgs>) => Promise<Song[]>;
     getDownloadUrl: (args: ReplaceApiClientProps<DownloadArgs>) => string;
+    getFavoriteSongs: (
+        args: ReplaceApiClientProps<FavoriteSongListArgs>,
+    ) => Promise<FavoriteSongListResponse>;
     getFolder: (args: ReplaceApiClientProps<FolderArgs>) => Promise<FolderResponse>;
     getGenreList: (args: ReplaceApiClientProps<GenreListArgs>) => Promise<GenreListResponse>;
+    getImageRequest: (args: ReplaceApiClientProps<ImageArgs>) => ImageRequest | null;
     getImageUrl: (args: ReplaceApiClientProps<ImageArgs>) => null | string;
     getInternetRadioStations: (
         args: ReplaceApiClientProps<GetInternetRadioStationsArgs>,
@@ -1487,6 +1759,9 @@ export type InternalControllerEndpoint = {
         args: ReplaceApiClientProps<PlaylistListArgs>,
     ) => Promise<PlaylistListResponse>;
     getPlaylistListCount: (args: ReplaceApiClientProps<PlaylistListCountArgs>) => Promise<number>;
+    getPlaylistSongIds: (
+        args: ReplaceApiClientProps<PlaylistSongListArgs>,
+    ) => Promise<SongIdListResponse>;
     getPlaylistSongList: (
         args: ReplaceApiClientProps<PlaylistSongListArgs>,
     ) => Promise<SongListResponse>;
@@ -1497,12 +1772,15 @@ export type InternalControllerEndpoint = {
     getRoles: (
         args: ReplaceApiClientProps<BaseEndpointArgs>,
     ) => Promise<Array<string | { label: string; value: string }>>;
+    getScanStatus: (
+        args: ReplaceApiClientProps<GetScanStatusArgs>,
+    ) => Promise<GetScanStatusResponse>;
     getServerInfo: (args: ReplaceApiClientProps<ServerInfoArgs>) => Promise<ServerInfo>;
     getSimilarSongs: (args: ReplaceApiClientProps<SimilarSongsArgs>) => Promise<Song[]>;
     getSongDetail: (args: ReplaceApiClientProps<SongDetailArgs>) => Promise<SongDetailResponse>;
     getSongList: (args: ReplaceApiClientProps<SongListArgs>) => Promise<SongListResponse>;
     getSongListCount: (args: ReplaceApiClientProps<SongListCountArgs>) => Promise<number>;
-    getStreamUrl: (args: ReplaceApiClientProps<StreamArgs>) => string;
+    getStreamUrl: (args: ReplaceApiClientProps<StreamArgs>) => Promise<string>;
     getStructuredLyrics?: (
         args: ReplaceApiClientProps<StructuredLyricsArgs>,
     ) => Promise<StructuredLyric[]>;
@@ -1510,7 +1788,11 @@ export type InternalControllerEndpoint = {
     getTopSongs: (args: ReplaceApiClientProps<TopSongListArgs>) => Promise<TopSongListResponse>;
     getUserInfo: (args: ReplaceApiClientProps<UserInfoArgs>) => Promise<UserInfoResponse>;
     getUserList?: (args: ReplaceApiClientProps<UserListArgs>) => Promise<UserListResponse>;
+    jukeboxControl?: (
+        args: ReplaceApiClientProps<JukeboxControlArgs>,
+    ) => Promise<JukeboxControlResponse>;
     movePlaylistItem?: (args: ReplaceApiClientProps<MoveItemArgs>) => Promise<void>;
+    refreshItems: (args: ReplaceApiClientProps<RefreshItemsArgs>) => Promise<RefreshItemsResponse>;
     removeFromPlaylist: (
         args: ReplaceApiClientProps<RemoveFromPlaylistArgs>,
     ) => Promise<RemoveFromPlaylistResponse>;
@@ -1520,14 +1802,77 @@ export type InternalControllerEndpoint = {
     savePlayQueue: (args: ReplaceApiClientProps<SaveQueueArgs>) => Promise<void>;
     scrobble: (args: ReplaceApiClientProps<ScrobbleArgs>) => Promise<ScrobbleResponse>;
     search: (args: ReplaceApiClientProps<SearchArgs>) => Promise<SearchResponse>;
+    setPlaylistSongs: (
+        args: ReplaceApiClientProps<SetPlaylistSongsArgs>,
+    ) => Promise<SetPlaylistSongsResponse>;
     setRating?: (args: ReplaceApiClientProps<SetRatingArgs>) => Promise<RatingResponse>;
     shareItem?: (args: ReplaceApiClientProps<ShareItemArgs>) => Promise<ShareItemResponse>;
+    startLibraryScan: (
+        args: ReplaceApiClientProps<StartLibraryScanArgs>,
+    ) => Promise<StartLibraryScanResponse>;
     updateInternetRadioStation: (
         args: ReplaceApiClientProps<UpdateInternetRadioStationArgs>,
     ) => Promise<UpdateInternetRadioStationResponse>;
     updatePlaylist: (
         args: ReplaceApiClientProps<UpdatePlaylistArgs>,
     ) => Promise<UpdatePlaylistResponse>;
+    uploadArtistImage?: (
+        args: ReplaceApiClientProps<UploadArtistImageArgs>,
+    ) => Promise<UploadArtistImageResponse>;
+    uploadInternetRadioStationImage?: (
+        args: ReplaceApiClientProps<UploadInternetRadioStationImageArgs>,
+    ) => Promise<UploadInternetRadioStationImageResponse>;
+    uploadPlaylistImage?: (
+        args: ReplaceApiClientProps<UploadPlaylistImageArgs>,
+    ) => Promise<UploadPlaylistImageResponse>;
+};
+
+export type JukeboxControlAction =
+    | 'add'
+    | 'clear'
+    | 'get'
+    | 'remove'
+    | 'set'
+    | 'setGain'
+    | 'shuffle'
+    | 'skip'
+    | 'start'
+    | 'status'
+    | 'stop';
+
+export type JukeboxControlArgs = BaseEndpointArgs & { query: JukeboxControlQuery };
+
+export type JukeboxControlQuery = {
+    action: JukeboxControlAction;
+    gain?: number;
+    id?: string | string[];
+    index?: number;
+    offset?: number;
+};
+
+export type JukeboxControlResponse = null | {
+    jukeboxPlaylist?: {
+        currentIndex?: number;
+        entry?: Array<{
+            album?: string;
+            artist?: string;
+            coverArt?: string;
+            duration?: number;
+            id: string;
+            isDir: boolean;
+            parent?: string;
+            title: string;
+        }>;
+        gain: number;
+        playing: boolean;
+        position?: number;
+    };
+    jukeboxStatus?: {
+        currentIndex?: number;
+        gain: number;
+        playing: boolean;
+        position?: number;
+    };
 };
 
 export type LyricGetQuery = {
@@ -1576,12 +1921,22 @@ export type ServerInfo = {
 
 export type ServerInfoArgs = BaseEndpointArgs;
 
+export type SetPlaylistSongsArgs = BaseEndpointArgs & { body: SetPlaylistSongsQuery };
+
+export type SetPlaylistSongsQuery = {
+    id: string;
+    songIds: string[];
+};
+
+export type SetPlaylistSongsResponse = null;
+
 export type SimilarSongsArgs = BaseEndpointArgs & {
     query: SimilarSongsQuery;
 };
 
 export type SimilarSongsQuery = {
     count?: number;
+    musicFolderId?: string | string[];
     songId: string;
 };
 
@@ -1593,6 +1948,9 @@ export type StreamQuery = {
     bitrate?: number;
     format?: string;
     id: string;
+    mediaType?: 'podcast' | 'song';
+    offset?: number;
+    skipAutoTranscode?: boolean;
     transcode: boolean;
 };
 
@@ -1605,7 +1963,9 @@ export type StructuredLyricsArgs = BaseEndpointArgs & {
 };
 
 export type StructuredSyncedLyric = Omit<FullLyricsMetadata, 'lyrics'> & {
-    lyrics: SynchronizedLyricsArray;
+    agents?: LyricAgent[];
+    kind?: LyricsKind;
+    lyrics: SynchronizedLyrics;
     synced: true;
 };
 
@@ -1615,7 +1975,6 @@ export type StructuredUnsyncedLyric = Omit<FullLyricsMetadata, 'lyrics'> & {
 };
 
 export type Tag = {
-    id: string;
     name: string;
     options: { id: string; name: string }[];
 };
@@ -1631,12 +1990,55 @@ export type TagListQuery = {
 };
 
 export type TagListResponse = {
-    boolTags?: string[];
-    enumTags?: { name: string; options: { id: string; name: string }[] }[];
     excluded: {
         album: string[];
         song: string[];
     };
+    tags?: Tag[];
+};
+
+export type TranscodeDecisionArgs = BaseEndpointArgs & {
+    body?: TranscodeDecisionRequestBody;
+    query: TranscodeDecisionQuery;
+};
+
+export type TranscodeDecisionQuery = {
+    id: string;
+    type: 'song';
+};
+
+export type TranscodeDecisionRequestBody = {
+    codecProfiles?: Array<{
+        limitations?: Array<{
+            comparison: string;
+            name: string;
+            required?: boolean;
+            values: string[];
+        }>;
+        name: string;
+        type: string;
+    }>;
+    directPlayProfiles?: Array<{
+        audioCodecs: string[];
+        containers: string[];
+        maxAudioChannels?: number;
+        protocols: string[];
+    }>;
+    maxAudioBitrate?: number;
+    maxTranscodingAudioBitrate?: number;
+    name: string;
+    platform: string;
+    transcodingProfiles?: Array<{
+        audioCodec: string;
+        container: string;
+        maxAudioChannels?: number;
+        protocol: string;
+    }>;
+};
+
+export type TranscodeDecisionResponse = {
+    decision: 'direct' | 'transcode';
+    transcodeParams?: string;
 };
 
 export type UserInfoArgs = BaseEndpointArgs & { query: UserInfoQuery };
@@ -1658,4 +2060,5 @@ type BaseEndpointArgsWithServer = {
         serverId: string;
         signal?: AbortSignal;
     };
+    context?: ApiContext;
 };

@@ -1,10 +1,13 @@
 import type {
     AlbumArtistDetailQuery,
+    AlbumArtistInfoQuery,
     AlbumArtistListQuery,
     AlbumDetailQuery,
     AlbumListQuery,
+    AlbumRadioQuery,
     ArtistListQuery,
     ArtistRadioQuery,
+    FavoriteSongListQuery,
     FolderQuery,
     GenreListQuery,
     LyricSearchQuery,
@@ -73,6 +76,13 @@ export const queryKeys: Record<
 
             return [serverId, 'albumArtists', 'detail'] as const;
         },
+        favoriteSongs: (serverId: string, query?: FavoriteSongListQuery) => {
+            if (query) {
+                return [serverId, 'albumArtists', 'favoriteSongs', query] as const;
+            }
+
+            return [serverId, 'albumArtists', 'favoriteSongs'] as const;
+        },
         infiniteList: (serverId: string, query?: AlbumArtistListQuery) => {
             const { filter, pagination } = splitPaginatedQuery(query);
             if (query && pagination) {
@@ -84,6 +94,13 @@ export const queryKeys: Record<
             }
 
             return [serverId, 'albumArtists', 'infiniteList'] as const;
+        },
+        info: (serverId: string, query?: AlbumArtistInfoQuery) => {
+            if (query) {
+                return [serverId, 'albumArtists', 'info', query] as const;
+            }
+
+            return [serverId, 'albumArtists', 'info'] as const;
         },
         list: (serverId: string, query?: AlbumArtistListQuery) => {
             const { filter, pagination } = splitPaginatedQuery(query);
@@ -322,6 +339,9 @@ export const queryKeys: Record<
 
             return [serverId, 'playlists', 'songList'] as const;
         },
+        songListIds: (serverId: string, id: string) => {
+            return [serverId, 'playlists', 'songListIds', id] as const;
+        },
     },
     radio: {
         list: (serverId: string) => [serverId, 'radio', 'list'] as const,
@@ -331,6 +351,11 @@ export const queryKeys: Record<
         list: (serverId: string) => [serverId, 'roles'] as const,
     },
     search: {
+        infiniteList: (
+            serverId: string,
+            type: 'albumArtists' | 'albums' | 'songs',
+            searchTerm: string,
+        ) => [serverId, 'search', 'infiniteList', type, searchTerm] as const,
         list: (serverId: string, query?: SearchQuery) => {
             if (query) return [serverId, 'search', 'list', query] as const;
             return [serverId, 'search', 'list'] as const;
@@ -339,8 +364,13 @@ export const queryKeys: Record<
     },
     server: {
         root: (serverId: string) => [serverId] as const,
+        scanStatus: (serverId: string) => [serverId, 'server', 'scanStatus'] as const,
     },
     songs: {
+        albumRadio: (serverId: string, query?: AlbumRadioQuery) => {
+            if (query) return [serverId, 'songs', 'albumRadio', query] as const;
+            return [serverId, 'songs', 'albumRadio'] as const;
+        },
         artistRadio: (serverId: string, query?: ArtistRadioQuery) => {
             if (query) return [serverId, 'songs', 'artistRadio', query] as const;
             return [serverId, 'songs', 'artistRadio'] as const;
@@ -363,6 +393,18 @@ export const queryKeys: Record<
             }
 
             return [serverId, 'songs', 'detail'] as const;
+        },
+        infiniteList: (serverId: string, query?: SongListQuery) => {
+            const { filter, pagination } = splitPaginatedQuery(query);
+            if (query && pagination) {
+                return [serverId, 'songs', 'infiniteList', filter, pagination] as const;
+            }
+
+            if (query) {
+                return [serverId, 'songs', 'infiniteList', filter] as const;
+            }
+
+            return [serverId, 'songs', 'infiniteList'] as const;
         },
         list: (serverId: string, query?: SongListQuery) => {
             const { filter, pagination } = splitPaginatedQuery(query);

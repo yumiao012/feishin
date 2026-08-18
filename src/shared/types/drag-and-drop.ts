@@ -12,6 +12,7 @@ export enum DragTarget {
     GRID_ROW = 'gridRow',
     PLAYLIST = LibraryItem.PLAYLIST,
     QUEUE_SONG = LibraryItem.QUEUE_SONG,
+    SIDEBAR_PLAYLIST_FOLDER = 'sidebarPlaylistFolder',
     SONG = LibraryItem.SONG,
     TABLE_COLUMN = 'tableColumn',
 }
@@ -87,27 +88,25 @@ export const dndUtils = {
             return list;
         }
 
-        // If dragging to the right, but is left edge, do nothing
-        if (edge === 'left' && indexTo > indexFrom) {
+        let newIndex: number;
+
+        if (edge === 'bottom') {
+            newIndex = indexFrom > indexTo ? indexTo + 1 : indexTo;
+        } else if (edge === 'top' || edge === null) {
+            newIndex = indexTo;
+        } else if (edge === 'left' && indexTo > indexFrom) {
+            return list;
+        } else if (edge === 'right' && indexTo < indexFrom) {
+            return list;
+        } else {
+            newIndex = indexTo;
+        }
+
+        if (newIndex === indexFrom) {
             return list;
         }
 
-        // If dragging to the left, but is right edge, do nothing
-        if (edge === 'right' && indexTo < indexFrom) {
-            return list;
-        }
-
-        // If dragging to the top, but is bottom edge, do nothing
-        if (edge === 'top' && indexTo > indexFrom) {
-            return list;
-        }
-
-        // If dragging to the bottom, but is top edge, do nothing
-        if (edge === 'bottom' && indexTo < indexFrom) {
-            return list;
-        }
-
-        return dndUtils.reorderByIndex({ index: indexFrom, list, newIndex: indexTo });
+        return dndUtils.reorderByIndex({ index: indexFrom, list, newIndex });
     },
     reorderByIndex: (args: { index: number; list: string[]; newIndex: number }) => {
         const { index, list, newIndex } = args;

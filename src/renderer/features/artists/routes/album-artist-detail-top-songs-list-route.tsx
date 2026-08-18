@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useParams } from 'react-router';
 
+import { playSongFromItemListControl } from '/@/renderer/components/item-list/helpers/play-row-from-list';
 import { useItemListColumnReorder } from '/@/renderer/components/item-list/helpers/use-item-list-column-reorder';
 import { useItemListColumnResize } from '/@/renderer/components/item-list/helpers/use-item-list-column-resize';
 import { ItemTableList } from '/@/renderer/components/item-list/item-table-list/item-table-list';
@@ -12,13 +13,13 @@ import { artistsQueries } from '/@/renderer/features/artists/api/artists-api';
 import { AlbumArtistDetailTopSongsListHeader } from '/@/renderer/features/artists/components/album-artist-detail-top-songs-list-header';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import { AnimatedPage } from '/@/renderer/features/shared/components/animated-page';
-import { LibraryContainer } from '/@/renderer/features/shared/components/library-container';
 import { PageErrorBoundary } from '/@/renderer/features/shared/components/page-error-boundary';
 import { usePlayerSong } from '/@/renderer/store';
 import { useCurrentServer } from '/@/renderer/store/auth.store';
 import { useSettingsStore } from '/@/renderer/store/settings.store';
+import { useLocalStorage } from '/@/shared/hooks/use-local-storage';
 import { LibraryItem, Song } from '/@/shared/types/domain-types';
-import { ItemListKey, Play } from '/@/shared/types/types';
+import { ItemListKey } from '/@/shared/types/types';
 
 const AlbumArtistDetailTopSongsListRoute = () => {
     const { albumArtistId, artistId } = useParams() as {
@@ -29,17 +30,25 @@ const AlbumArtistDetailTopSongsListRoute = () => {
     const server = useCurrentServer();
     const pageKey = LibraryItem.SONG;
 
-    const detailQuery = useQuery(
+    const [topSongsQueryType] = useLocalStorage<'community' | 'personal'>({
+        defaultValue: 'community',
+        key: 'album-artist-top-songs-query-type',
+    });
+
+    const detailQuery = useSuspenseQuery(
         artistsQueries.albumArtistDetail({
             query: { id: routeId },
             serverId: server?.id,
         }),
     );
 
-    const topSongsQuery = useQuery(
+    const topSongsQuery = useSuspenseQuery(
         artistsQueries.topSongs({
-            options: { enabled: !!detailQuery?.data?.name },
-            query: { artist: detailQuery?.data?.name || '', artistId: routeId },
+            query: {
+                artist: detailQuery?.data?.name || '',
+                artistId: routeId,
+                type: topSongsQueryType,
+            },
             serverId: server?.id,
         }),
     );
@@ -70,12 +79,13 @@ const AlbumArtistDetailTopSongsListRoute = () => {
                     return;
                 }
 
-                const playType = (meta?.playType as Play) || Play.NOW;
-                const items = internalState?.getData() as Song[];
-
-                if (index !== undefined) {
-                    player.addToQueueByData(items, playType, item.id);
-                }
+                playSongFromItemListControl({
+                    index,
+                    internalState,
+                    item: item as Song,
+                    meta,
+                    player,
+                });
             },
         };
     }, [player]);
@@ -93,13 +103,11 @@ const AlbumArtistDetailTopSongsListRoute = () => {
         return (
             <AnimatedPage>
                 <ListContext.Provider value={providerValue}>
-                    <LibraryContainer>
-                        <AlbumArtistDetailTopSongsListHeader
-                            data={songs}
-                            itemCount={itemCount}
-                            title={detailQuery?.data?.name || 'Unknown'}
-                        />
-                    </LibraryContainer>
+                    <AlbumArtistDetailTopSongsListHeader
+                        data={songs}
+                        itemCount={itemCount}
+                        title={detailQuery?.data?.name || 'Unknown'}
+                    />
                 </ListContext.Provider>
             </AnimatedPage>
         );
@@ -108,34 +116,32 @@ const AlbumArtistDetailTopSongsListRoute = () => {
     return (
         <AnimatedPage>
             <ListContext.Provider value={providerValue}>
-                <LibraryContainer>
-                    <AlbumArtistDetailTopSongsListHeader
-                        data={songs}
-                        itemCount={itemCount}
-                        title={detailQuery?.data?.name || 'Unknown'}
-                    />
-                    <ItemTableList
-                        activeRowId={currentSongId}
-                        autoFitColumns={tableConfig.autoFitColumns}
-                        CellComponent={ItemTableListColumn}
-                        columns={columns}
-                        data={songs}
-                        enableAlternateRowColors={tableConfig.enableAlternateRowColors}
-                        enableDrag
-                        enableExpansion={false}
-                        enableHeader
-                        enableHorizontalBorders={tableConfig.enableHorizontalBorders}
-                        enableRowHoverHighlight={tableConfig.enableRowHoverHighlight}
-                        enableSelection
-                        enableSelectionDialog={false}
-                        enableVerticalBorders={tableConfig.enableVerticalBorders}
-                        itemType={LibraryItem.SONG}
-                        onColumnReordered={handleColumnReordered}
-                        onColumnResized={handleColumnResized}
-                        overrideControls={overrideControls}
-                        size={tableConfig.size}
-                    />
-                </LibraryContainer>
+                <AlbumArtistDetailTopSongsListHeader
+                    data={songs}
+                    itemCount={itemCount}
+                    title={detailQuery?.data?.name || 'Unknown'}
+                />
+                <ItemTableList
+                    activeRowId={currentSongId}
+                    autoFitColumns={tableConfig.autoFitColumns}
+                    CellComponent={ItemTableListColumn}
+                    columns={columns}
+                    data={songs}
+                    enableAlternateRowColors={tableConfig.enableAlternateRowColors}
+                    enableDrag
+                    enableExpansion={false}
+                    enableHeader={tableConfig.enableHeader}
+                    enableHorizontalBorders={tableConfig.enableHorizontalBorders}
+                    enableRowHoverHighlight={tableConfig.enableRowHoverHighlight}
+                    enableSelection
+                    enableSelectionDialog={false}
+                    enableVerticalBorders={tableConfig.enableVerticalBorders}
+                    itemType={LibraryItem.SONG}
+                    onColumnReordered={handleColumnReordered}
+                    onColumnResized={handleColumnResized}
+                    overrideControls={overrideControls}
+                    size={tableConfig.size}
+                />
             </ListContext.Provider>
         </AnimatedPage>
     );

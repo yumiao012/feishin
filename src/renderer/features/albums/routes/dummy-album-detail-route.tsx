@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { generatePath, Link, useParams } from 'react-router';
@@ -19,7 +19,7 @@ import { useDeleteFavorite } from '/@/renderer/features/shared/mutations/delete-
 import { useFastAverageColor } from '/@/renderer/hooks';
 import { queryClient } from '/@/renderer/lib/react-query';
 import { AppRoute } from '/@/renderer/router/routes';
-import { useCurrentServer } from '/@/renderer/store';
+import { useCurrentServer, useShowFavorites } from '/@/renderer/store';
 import { usePlayButtonBehavior } from '/@/renderer/store/settings.store';
 import { formatDurationString } from '/@/renderer/utils';
 import { replaceURLWithHTMLLinks } from '/@/renderer/utils/linkify';
@@ -38,8 +38,9 @@ const DummyAlbumDetailRoute = () => {
 
     const { albumId } = useParams() as { albumId: string };
     const server = useCurrentServer();
+    const showFavorites = useShowFavorites();
     const queryKey = queryKeys.songs.detail(server?.id || '', albumId);
-    const detailQuery = useQuery({
+    const detailQuery = useSuspenseQuery({
         queryFn: ({ signal }) => {
             return api.controller.getSongDetail({
                 apiClientProps: { serverId: server?.id || '', signal },
@@ -52,7 +53,7 @@ const DummyAlbumDetailRoute = () => {
     const { background, colorId } = useFastAverageColor({
         id: albumId,
         src: detailQuery.data?.imageUrl,
-        srcLoaded: !detailQuery.isLoading,
+        srcLoaded: Boolean(detailQuery.data?.imageUrl),
     });
     const { addToQueueByFetch } = usePlayer();
     const playButtonBehavior = usePlayButtonBehavior();
@@ -115,7 +116,7 @@ const DummyAlbumDetailRoute = () => {
     ];
 
     const imageUrl = useItemImageUrl({
-        id: albumId,
+        id: detailQuery?.data?.imageId || undefined,
         itemType: LibraryItem.ALBUM,
         type: 'header',
     });
@@ -126,7 +127,13 @@ const DummyAlbumDetailRoute = () => {
                 <Stack>
                     <LibraryHeader
                         imageUrl={imageUrl}
-                        item={{ route: AppRoute.LIBRARY_SONGS, type: LibraryItem.SONG }}
+                        item={{
+                            explicitStatus: detailQuery?.data?.explicitStatus ?? null,
+                            imageId: detailQuery?.data?.imageId,
+                            imageUrl: detailQuery?.data?.imageUrl,
+                            route: AppRoute.LIBRARY_SONGS,
+                            type: LibraryItem.SONG,
+                        }}
                         loading={!background || colorId !== albumId}
                         title={detailQuery?.data?.name || ''}
                     >
@@ -172,20 +179,22 @@ const DummyAlbumDetailRoute = () => {
                         <Group gap="sm" justify="space-between">
                             <Group>
                                 <DefaultPlayButton onClick={() => handlePlay()} />
-                                <ActionIcon
-                                    icon="favorite"
-                                    iconProps={{
-                                        fill: detailQuery?.data?.userFavorite
-                                            ? 'primary'
-                                            : undefined,
-                                    }}
-                                    loading={
-                                        createFavoriteMutation.isPending ||
-                                        deleteFavoriteMutation.isPending
-                                    }
-                                    onClick={handleFavorite}
-                                    variant="subtle"
-                                />
+                                {showFavorites && (
+                                    <ActionIcon
+                                        icon="favorite"
+                                        iconProps={{
+                                            fill: detailQuery?.data?.userFavorite
+                                                ? 'primary'
+                                                : undefined,
+                                        }}
+                                        loading={
+                                            createFavoriteMutation.isPending ||
+                                            deleteFavoriteMutation.isPending
+                                        }
+                                        onClick={handleFavorite}
+                                        variant="subtle"
+                                    />
+                                )}
                                 <ActionIcon
                                     icon="ellipsisHorizontal"
                                     onClick={() => {
@@ -228,7 +237,7 @@ const DummyAlbumDetailRoute = () => {
                             <Group mr={5}>
                                 <Icon fill="error" icon="error" size={30} />
                             </Group>
-                            <h2>{t('error.badAlbum', { postProcess: 'sentenceCase' })}</h2>
+                            <h2>{t('error.badAlbum')}</h2>
                         </Center>
                     </section>
                 </div>

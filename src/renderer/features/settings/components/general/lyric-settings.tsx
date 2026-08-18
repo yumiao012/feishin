@@ -1,4 +1,5 @@
 import isElectron from 'is-electron';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { languages } from '/@/i18n/i18n';
@@ -16,10 +17,19 @@ import { LyricSource } from '/@/shared/types/domain-types';
 
 const localSettings = isElectron() ? window.api.localSettings : null;
 
-export const LyricSettings = () => {
+export const LyricSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useLyricsSettings();
     const { setSettings } = useSettingsStoreActions();
+
+    const updateSetting = (updates: Partial<typeof settings>) => {
+        setSettings({
+            lyrics: {
+                ...settings,
+                ...updates,
+            },
+        });
+    };
 
     const lyricOptions: SettingOption[] = [
         {
@@ -27,65 +37,41 @@ export const LyricSettings = () => {
                 <Switch
                     aria-label="Follow lyrics"
                     defaultChecked={settings.follow}
-                    onChange={(e) => {
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                follow: e.currentTarget.checked,
-                            },
-                        });
-                    }}
+                    onChange={(e) => updateSetting({ follow: e.currentTarget.checked })}
                 />
             ),
             description: t('setting.followLyric', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.followLyric', { postProcess: 'sentenceCase' }),
+            title: t('setting.followLyric'),
         },
         {
             control: (
                 <Switch
                     aria-label="Prefer local lyrics"
                     defaultChecked={settings.preferLocalLyrics}
-                    onChange={(e) => {
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                preferLocalLyrics: e.currentTarget.checked,
-                            },
-                        });
-                    }}
+                    onChange={(e) => updateSetting({ preferLocalLyrics: e.currentTarget.checked })}
                 />
             ),
             description: t('setting.preferLocalLyrics', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.preferLocalLyrics', { postProcess: 'sentenceCase' }),
+            title: t('setting.preferLocalLyrics'),
         },
         {
             control: (
                 <Switch
                     aria-label="Enable fetching lyrics"
                     defaultChecked={settings.fetch}
-                    onChange={(e) => {
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                fetch: e.currentTarget.checked,
-                            },
-                        });
-                    }}
+                    onChange={(e) => updateSetting({ fetch: e.currentTarget.checked })}
                 />
             ),
             description: t('setting.lyricFetch', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.lyricFetch', { postProcess: 'sentenceCase' }),
+            title: t('setting.lyricFetch'),
         },
         {
             control: (
@@ -96,22 +82,42 @@ export const LyricSettings = () => {
                     defaultValue={settings.sources}
                     onChange={(e: string[]) => {
                         localSettings?.set('lyrics', e);
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                sources: e.map((source) => source as LyricSource),
-                            },
-                        });
+                        updateSetting({ sources: e.map((source) => source as LyricSource) });
                     }}
                     width={300}
                 />
             ),
             description: t('setting.lyricFetchProvider', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.lyricFetchProvider', { postProcess: 'sentenceCase' }),
+            title: t('setting.lyricFetchProvider'),
+        },
+        {
+            control: (
+                <Switch
+                    aria-label="Enable furigana generation"
+                    defaultChecked={settings.enableFurigana}
+                    onChange={(e) => updateSetting({ enableFurigana: e.currentTarget.checked })}
+                />
+            ),
+            description: t('setting.enableFurigana', {
+                context: 'description',
+            }),
+            title: t('setting.enableFurigana'),
+        },
+        {
+            control: (
+                <Switch
+                    aria-label="Enable romaji generation"
+                    defaultChecked={settings.enableRomaji}
+                    onChange={(e) => updateSetting({ enableRomaji: e.currentTarget.checked })}
+                />
+            ),
+            description: t('setting.enableRomaji', {
+                context: 'description',
+            }),
+            title: t('setting.enableRomaji'),
         },
         {
             control: (
@@ -120,22 +126,16 @@ export const LyricSettings = () => {
                     defaultChecked={settings.enableNeteaseTranslation}
                     onChange={(e) => {
                         const isChecked = e.currentTarget.checked;
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                enableNeteaseTranslation: e.currentTarget.checked,
-                            },
-                        });
+                        updateSetting({ enableNeteaseTranslation: isChecked });
                         localSettings?.set('enableNeteaseTranslation', isChecked);
                     }}
                 />
             ),
             description: t('setting.neteaseTranslation', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.neteaseTranslation', { postProcess: 'sentenceCase' }),
+            title: t('setting.neteaseTranslation'),
         },
         {
             control: (
@@ -143,12 +143,7 @@ export const LyricSettings = () => {
                     defaultValue={settings.delayMs}
                     onBlur={(e) => {
                         const value = Number(e.currentTarget.value);
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                delayMs: value,
-                            },
-                        });
+                        updateSetting({ delayMs: value });
                     }}
                     step={10}
                     width={100}
@@ -156,27 +151,25 @@ export const LyricSettings = () => {
             ),
             description: t('setting.lyricOffset', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.lyricOffset', { postProcess: 'sentenceCase' }),
+            title: t('setting.lyricOffset'),
         },
         {
             control: (
                 <Select
                     data={languages}
                     onChange={(value) => {
-                        setSettings({ lyrics: { ...settings, translationTargetLanguage: value } });
+                        updateSetting({ translationTargetLanguage: value });
                     }}
                     value={settings.translationTargetLanguage}
                 />
             ),
             description: t('setting.translationTargetLanguage', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.translationTargetLanguage', { postProcess: 'sentenceCase' }),
+            title: t('setting.translationTargetLanguage'),
         },
         {
             control: (
@@ -184,64 +177,49 @@ export const LyricSettings = () => {
                     clearable
                     data={['Microsoft Azure', 'Google Cloud']}
                     onChange={(value) => {
-                        setSettings({ lyrics: { ...settings, translationApiProvider: value } });
+                        updateSetting({ translationApiProvider: value });
                     }}
                     value={settings.translationApiProvider}
                 />
             ),
             description: t('setting.translationApiProvider', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.translationApiProvider', { postProcess: 'sentenceCase' }),
+            title: t('setting.translationApiProvider'),
         },
         {
             control: (
                 <TextInput
                     onChange={(e) => {
-                        setSettings({
-                            lyrics: { ...settings, translationApiKey: e.currentTarget.value },
-                        });
+                        updateSetting({ translationApiKey: e.currentTarget.value });
                     }}
                     value={settings.translationApiKey}
                 />
             ),
             description: t('setting.translationApiKey', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.translationApiKey', { postProcess: 'sentenceCase' }),
+            title: t('setting.translationApiKey'),
         },
         {
             control: (
                 <Switch
                     aria-label="Enable auto translation"
                     defaultChecked={settings.enableAutoTranslation}
-                    onChange={(e) => {
-                        setSettings({
-                            lyrics: {
-                                ...settings,
-                                enableAutoTranslation: e.currentTarget.checked,
-                            },
-                        });
-                    }}
+                    onChange={(e) =>
+                        updateSetting({ enableAutoTranslation: e.currentTarget.checked })
+                    }
                 />
             ),
             description: t('setting.enableAutoTranslation', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.enableAutoTranslation', { postProcess: 'sentenceCase' }),
+            title: t('setting.enableAutoTranslation'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={lyricOptions}
-            title={t('page.setting.lyrics', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={lyricOptions} title={t('page.setting.lyrics')} />;
+});

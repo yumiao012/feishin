@@ -1,19 +1,19 @@
 import IcecastMetadataStats from 'icecast-metadata-stats';
 import isElectron from 'is-electron';
-import { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { createWithEqualityFn } from 'zustand/traditional';
 
 import { usePlayerEvents } from '/@/renderer/features/player/audio-player/hooks/use-player-events';
-import { convertToLogVolume } from '/@/renderer/features/player/audio-player/utils/player-utils';
-import {
-    usePlaybackType,
-    usePlayerMuted,
-    usePlayerStoreBase,
-    usePlayerVolume,
-    useSettingsStore,
-} from '/@/renderer/store';
-import { toast } from '/@/shared/components/toast/toast';
+import { usePlaybackType, usePlayerStoreBase, useSettingsStore } from '/@/renderer/store';
+import { logger } from '/@/renderer/utils/logger';
 import { PlayerStatus, PlayerType } from '/@/shared/types/types';
+
+export type RadioCurrentStationArt = {
+    id: string;
+    imageId?: null | string;
+    imageUrl?: null | string;
+    serverId: string;
+};
 
 export interface RadioMetadata {
     artist: null | string;
@@ -22,27 +22,50 @@ export interface RadioMetadata {
 
 interface RadioStore {
     actions: {
+        clear: () => void;
         pause: () => void;
-        play: (streamUrl?: string, stationName?: string) => void;
+        play: (
+            streamUrl?: string,
+            stationName?: string,
+            stationArt?: null | RadioCurrentStationArt,
+        ) => void;
         setCurrentStreamUrl: (currentStreamUrl: null | string) => void;
         setIsPlaying: (isPlaying: boolean) => void;
         setMetadata: (metadata: null | RadioMetadata) => void;
         setStationName: (stationName: null | string) => void;
         stop: () => void;
     };
+    currentStationArt: null | RadioCurrentStationArt;
     currentStreamUrl: null | string;
     isPlaying: boolean;
     metadata: null | RadioMetadata;
     stationName: null | string;
 }
 
+const CLEARED_RADIO_STATE = {
+    currentStationArt: null,
+    currentStreamUrl: null,
+    isPlaying: false,
+    metadata: null,
+    stationName: null,
+} as const;
+
 export const useRadioStore = createWithEqualityFn<RadioStore>((set) => ({
     actions: {
+        clear: () => {
+            logger.debug('Cleared radio state');
+            set({ ...CLEARED_RADIO_STATE });
+        },
         pause: () => {
+            logger.debug('Paused radio playback');
             set({ isPlaying: false });
             usePlayerStoreBase.getState().mediaPause();
         },
-        play: (streamUrl?: string, stationName?: string) => {
+        play: (
+            streamUrl?: string,
+            stationName?: string,
+            stationArt?: null | RadioCurrentStationArt,
+        ) => {
             set((state) => {
                 const newStreamUrl = streamUrl ?? state.currentStreamUrl;
                 const newStationName = stationName ?? state.stationName;
@@ -51,12 +74,23 @@ export const useRadioStore = createWithEqualityFn<RadioStore>((set) => ({
                     return state;
                 }
 
-                // Reset metadata when switching stations (streamUrl changes)
-                const isSwitchingStation = newStreamUrl !== state.currentStreamUrl;
+                const streamUrlExplicit = streamUrl !== undefined;
+                const isSwitchingStation =
+                    streamUrlExplicit && streamUrl !== state.currentStreamUrl;
 
+                let nextStationArt = state.currentStationArt;
+                if (isSwitchingStation) {
+                    nextStationArt = stationArt ?? null;
+                }
+
+                logger.debug('Started radio playback', {
+                    hasStationArt: Boolean(nextStationArt),
+                    stationName: newStationName,
+                });
                 usePlayerStoreBase.getState().mediaPlay();
 
                 return {
+                    currentStationArt: nextStationArt,
                     currentStreamUrl: newStreamUrl,
                     isPlaying: true,
                     metadata: isSwitchingStation ? null : state.metadata,
@@ -71,22 +105,20 @@ export const useRadioStore = createWithEqualityFn<RadioStore>((set) => ({
         stop: () => {
             const playbackType = useSettingsStore.getState().playback.type;
 
-            set({
-                currentStreamUrl: null,
-                isPlaying: false,
-                metadata: null,
-                stationName: null,
-            });
+            set({ ...CLEARED_RADIO_STATE });
 
             // When stopping radio with mpv, just pause instead of calling mediaStop
             // This prevents mpv from quitting
             if (playbackType === PlayerType.LOCAL && mpvPlayer) {
+                logger.debug('Paused radio playback via mpv');
                 mpvPlayer.pause();
             } else {
+                logger.debug('Stopped radio playback');
                 usePlayerStoreBase.getState().mediaStop();
             }
         },
     },
+    currentStationArt: null,
     currentStreamUrl: null,
     isPlaying: false,
     metadata: null,
@@ -98,12 +130,14 @@ export const useIsPlayingRadio = () => useRadioStore((state) => state.isPlaying)
 export const useIsRadioActive = () => useRadioStore((state) => Boolean(state.currentStreamUrl));
 
 export const useRadioPlayer = () => {
+    const currentStationArt = useRadioStore((state) => state.currentStationArt);
     const currentStreamUrl = useRadioStore((state) => state.currentStreamUrl);
     const isPlaying = useRadioStore((state) => state.isPlaying);
     const metadata = useRadioStore((state) => state.metadata);
     const stationName = useRadioStore((state) => state.stationName);
 
     return {
+        currentStationArt,
         currentStreamUrl,
         isPlaying,
         metadata,
@@ -122,18 +156,12 @@ export const useRadioControls = () => {
 };
 
 const mpvPlayer = isElectron() ? window.api.mpvPlayer : null;
-const mpvPlayerListener = isElectron() ? window.api.mpvPlayerListener : null;
-const ipc = isElectron() ? window.api.ipc : null;
 
 export const useRadioAudioInstance = () => {
     const { actions } = useRadioStore();
-    const { setCurrentStreamUrl, setIsPlaying, setStationName } = actions;
     const currentStreamUrl = useRadioStore((state) => state.currentStreamUrl);
     const isPlaying = useRadioStore((state) => state.isPlaying);
     const playbackType = usePlaybackType();
-    const volume = usePlayerVolume();
-    const isMuted = usePlayerMuted();
-    const audioRef = useRef<HTMLAudioElement | null>(null);
     const isUsingMpv = playbackType === PlayerType.LOCAL && mpvPlayer;
 
     // Handle mpv playback
@@ -147,134 +175,18 @@ export const useRadioAudioInstance = () => {
         } else {
             mpvPlayer.pause();
         }
-    }, [
-        currentStreamUrl,
-        isPlaying,
-        isUsingMpv,
-        setIsPlaying,
-        setCurrentStreamUrl,
-        setStationName,
-    ]);
-
-    useEffect(() => {
-        if (!isUsingMpv || !mpvPlayerListener || !ipc) {
-            return;
-        }
-
-        const handleMpvPlay = () => {
-            setIsPlaying(true);
-        };
-
-        const handleMpvPause = () => {
-            setIsPlaying(false);
-        };
-
-        const handleMpvStop = () => {
-            setIsPlaying(false);
-            setCurrentStreamUrl(null);
-            setStationName(null);
-        };
-
-        mpvPlayerListener.rendererPlay(handleMpvPlay);
-        mpvPlayerListener.rendererPause(handleMpvPause);
-        mpvPlayerListener.rendererStop(handleMpvStop);
-
-        return () => {
-            ipc.removeAllListeners('renderer-player-play');
-            ipc.removeAllListeners('renderer-player-pause');
-            ipc.removeAllListeners('renderer-player-stop');
-        };
-    }, [isUsingMpv, setIsPlaying, setCurrentStreamUrl, setStationName]);
-
-    // Handle web playback
-    useEffect(() => {
-        if (isUsingMpv) {
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = '';
-                audioRef.current = null;
-            }
-            return;
-        }
-
-        if (currentStreamUrl && isPlaying) {
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = '';
-            }
-
-            const audio = new Audio(currentStreamUrl);
-            audioRef.current = audio;
-
-            const linearVolume = volume / 100;
-            const logVolume = convertToLogVolume(linearVolume);
-            audio.volume = logVolume;
-            audio.muted = isMuted;
-
-            audio.addEventListener('play', () => {
-                setIsPlaying(true);
-            });
-
-            audio.addEventListener('pause', () => {
-                setIsPlaying(false);
-            });
-
-            audio.addEventListener('ended', () => {
-                setIsPlaying(false);
-                setCurrentStreamUrl(null);
-                setStationName(null);
-            });
-
-            audio.addEventListener('error', (error) => {
-                console.error('Radio stream error:', error);
-            });
-
-            // Attempt to play
-            audio.play().catch((error) => {
-                console.error('Failed to play audio:', error);
-                setIsPlaying(false);
-                setCurrentStreamUrl(null);
-                setStationName(null);
-                toast.error({ message: 'Failed to play radio stream' });
-            });
-        } else if (!currentStreamUrl || !isPlaying) {
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = '';
-                audioRef.current = null;
-            }
-        }
-
-        return () => {
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.src = '';
-                audioRef.current = null;
-            }
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-        currentStreamUrl,
-        isPlaying,
-        isUsingMpv,
-        setIsPlaying,
-        setCurrentStreamUrl,
-        setStationName,
-    ]);
-
-    useEffect(() => {
-        if (isUsingMpv || !audioRef.current) {
-            return;
-        }
-
-        const linearVolume = volume / 100;
-        const logVolume = convertToLogVolume(linearVolume);
-        audioRef.current.volume = logVolume;
-        audioRef.current.muted = isMuted;
-    }, [volume, isMuted, isUsingMpv]);
+    }, [currentStreamUrl, isPlaying, isUsingMpv]);
 
     usePlayerEvents(
         {
+            onPlayerPlay: () => {
+                const radioState = useRadioStore.getState();
+                if (!radioState.currentStreamUrl) {
+                    return;
+                }
+
+                actions.clear();
+            },
             onPlayerStatus: (properties, prev) => {
                 const radioState = useRadioStore.getState();
                 if (!radioState.currentStreamUrl) {
@@ -383,4 +295,34 @@ export const useRadioMetadata = () => {
             setMetadata(null);
         };
     }, [currentStreamUrl, setMetadata, isUsingMpv]);
+};
+
+const RadioAudioInstanceHookInner = () => {
+    useRadioAudioInstance();
+    return null;
+};
+
+export const RadioAudioInstanceHook = () => {
+    const isRadioActive = useIsRadioActive();
+
+    if (!isRadioActive) {
+        return null;
+    }
+
+    return React.createElement(RadioAudioInstanceHookInner);
+};
+
+const RadioMetadataHookInner = () => {
+    useRadioMetadata();
+    return null;
+};
+
+export const RadioMetadataHook = () => {
+    const isRadioActive = useIsRadioActive();
+
+    if (!isRadioActive) {
+        return null;
+    }
+
+    return React.createElement(RadioMetadataHookInner);
 };

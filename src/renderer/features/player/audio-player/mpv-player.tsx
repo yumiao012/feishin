@@ -11,6 +11,7 @@ import {
     usePlayerData,
     usePlayerMuted,
     usePlayerProperties,
+    usePlayerStore,
     usePlayerVolume,
 } from '/@/renderer/store';
 import { PlayerStatus } from '/@/shared/types/types';
@@ -22,12 +23,12 @@ const mpvPlayer = isElectron() ? window.api.mpvPlayer : null;
 
 export function MpvPlayer() {
     const playerRef = useRef<MpvPlayerEngineHandle>(null);
-    const { status } = usePlayerData();
+    const { currentSong, status } = usePlayerData();
     const { mediaAutoNext, setTimestamp } = usePlayerActions();
     const { speed } = usePlayerProperties();
     const isMuted = usePlayerMuted();
     const volume = usePlayerVolume();
-    const { audioFadeOnStatusChange } = usePlaybackSettings();
+    const { audioFadeOnStatusChange, preservePitch } = usePlaybackSettings();
 
     const [localPlayerStatus, setLocalPlayerStatus] = useState<PlayerStatus>(status);
     const [isTransitioning, setIsTransitioning] = useState(false);
@@ -68,12 +69,12 @@ export function MpvPlayer() {
                 }, PLAY_PAUSE_FADE_INTERVAL);
             });
 
-            if (status === PlayerStatus.PAUSED) {
-                await promise;
-                setLocalPlayerStatus(status);
-            } else if (status === PlayerStatus.PLAYING) {
+            if (status === PlayerStatus.PLAYING) {
                 setLocalPlayerStatus(status);
                 await promise;
+            } else {
+                await promise;
+                setLocalPlayerStatus(status);
             }
         },
         [],
@@ -108,19 +109,20 @@ export function MpvPlayer() {
             },
             onPlayerStatus: async (properties) => {
                 const status = properties.status;
+                const volume = usePlayerStore.getState().player.volume;
                 if (audioFadeOnStatusChange) {
-                    if (status === PlayerStatus.PAUSED) {
-                        fadeAndSetStatus(volume, 0, PLAY_PAUSE_FADE_DURATION, PlayerStatus.PAUSED);
-                    } else if (status === PlayerStatus.PLAYING) {
+                    if (status === PlayerStatus.PLAYING) {
                         fadeAndSetStatus(0, volume, PLAY_PAUSE_FADE_DURATION, PlayerStatus.PLAYING);
+                    } else {
+                        fadeAndSetStatus(volume, 0, PLAY_PAUSE_FADE_DURATION, status);
                     }
                 } else {
-                    if (status === PlayerStatus.PAUSED) {
-                        playerRef.current?.setVolume(0);
-                        setLocalPlayerStatus(PlayerStatus.PAUSED);
-                    } else if (status === PlayerStatus.PLAYING) {
+                    if (status === PlayerStatus.PLAYING) {
                         playerRef.current?.setVolume(volume);
                         setLocalPlayerStatus(PlayerStatus.PLAYING);
+                    } else {
+                        playerRef.current?.setVolume(0);
+                        setLocalPlayerStatus(status);
                     }
                 }
             },
@@ -145,8 +147,10 @@ export function MpvPlayer() {
         };
     }, []);
 
+    const hasCurrentSong = !!currentSong?.id;
+
     useEffect(() => {
-        if (localPlayerStatus !== PlayerStatus.PLAYING) {
+        if (localPlayerStatus !== PlayerStatus.PLAYING || !hasCurrentSong) {
             return;
         }
 
@@ -158,7 +162,7 @@ export function MpvPlayer() {
             try {
                 const time = await mpvPlayer.getCurrentTime();
                 if (time !== undefined) {
-                    setTimestamp(Number(time.toFixed(0)));
+                    setTimestamp(time);
                 }
             } catch {
                 // Do nothing
@@ -166,7 +170,7 @@ export function MpvPlayer() {
         }, 500);
 
         return () => clearInterval(interval);
-    }, [localPlayerStatus, setTimestamp]);
+    }, [hasCurrentSong, localPlayerStatus, setTimestamp]);
 
     return (
         <MpvPlayerEngine
@@ -176,6 +180,7 @@ export function MpvPlayer() {
             onProgress={onProgress}
             playerRef={playerRef}
             playerStatus={localPlayerStatus}
+            preservePitch={preservePitch}
             speed={speed}
             volume={volume}
         />

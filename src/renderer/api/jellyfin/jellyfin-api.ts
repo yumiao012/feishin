@@ -9,6 +9,7 @@ import packageJson from '../../../../package.json';
 import i18n from '/@/i18n/i18n';
 import { authenticationFailure } from '/@/renderer/api/utils';
 import { useAuthStore } from '/@/renderer/store';
+import { getServerUrl } from '/@/renderer/utils/normalize-server-url';
 import { jfType } from '/@/shared/api/jellyfin/jellyfin-types';
 import { getClientType } from '/@/shared/api/utils';
 import { ServerListItemWithCredential } from '/@/shared/types/domain-types';
@@ -53,12 +54,30 @@ export const contract = c.router({
             400: jfType._response.error,
         },
     },
+    deleteArtistImage: {
+        body: null,
+        method: 'DELETE',
+        path: 'Items/:id/Images/Primary',
+        responses: {
+            204: jfType._response.deleteArtistImage,
+            400: jfType._response.error,
+        },
+    },
     deletePlaylist: {
         body: null,
         method: 'DELETE',
         path: 'items/:id',
         responses: {
             204: jfType._response.deletePlaylist,
+            400: jfType._response.error,
+        },
+    },
+    deletePlaylistImage: {
+        body: null,
+        method: 'DELETE',
+        path: 'Items/:id/Images/Primary',
+        responses: {
+            204: jfType._response.deletePlaylistImage,
             400: jfType._response.error,
         },
     },
@@ -136,7 +155,7 @@ export const contract = c.router({
     },
     getInstantMix: {
         method: 'GET',
-        path: 'songs/:itemId/InstantMix',
+        path: 'items/:itemId/InstantMix',
         query: jfType._parameters.similarSongs,
         responses: {
             200: jfType._response.songList,
@@ -184,6 +203,14 @@ export const contract = c.router({
         query: jfType._parameters.getQueue,
         responses: {
             200: jfType._response.getSessions,
+            400: jfType._response.error,
+        },
+    },
+    getScheduledTasks: {
+        method: 'GET',
+        path: 'ScheduledTasks',
+        responses: {
+            200: jfType._response.scheduledTasks,
             400: jfType._response.error,
         },
     },
@@ -247,6 +274,15 @@ export const contract = c.router({
             404: jfType._response.error,
         },
     },
+    getStudioList: {
+        method: 'GET',
+        path: 'studios',
+        query: jfType._parameters.studioList,
+        responses: {
+            200: jfType._response.studioList,
+            400: jfType._response.error,
+        },
+    },
     getTopSongsList: {
         method: 'GET',
         path: 'users/:userId/items',
@@ -270,6 +306,23 @@ export const contract = c.router({
         path: 'playlists/:playlistId/items/:itemId/move/:newIdx',
         responses: {
             200: jfType._response.moveItem,
+            400: jfType._response.error,
+        },
+    },
+    refreshItem: {
+        body: z.null(),
+        method: 'POST',
+        path: 'Items/:id/Refresh',
+        query: z.object({
+            ImageRefreshMode: z.string().optional(),
+            MetadataRefreshMode: z.string().optional(),
+            Recursive: z.boolean().optional(),
+            RegenerateTrickplay: z.boolean().optional(),
+            ReplaceAllImages: z.boolean().optional(),
+            ReplaceAllMetadata: z.boolean().optional(),
+        }),
+        responses: {
+            204: z.null(),
             400: jfType._response.error,
         },
     },
@@ -346,6 +399,24 @@ export const contract = c.router({
             400: jfType._response.error,
         },
     },
+    uploadArtistImage: {
+        body: z.string(),
+        method: 'POST',
+        path: 'Items/:id/Images/Primary',
+        responses: {
+            204: jfType._response.uploadArtistImage,
+            400: jfType._response.error,
+        },
+    },
+    uploadPlaylistImage: {
+        body: z.string(),
+        method: 'POST',
+        path: 'Items/:id/Images/Primary',
+        responses: {
+            204: jfType._response.uploadPlaylistImage,
+            400: jfType._response.error,
+        },
+    },
 });
 
 const axiosClient = axios.create({});
@@ -394,11 +465,12 @@ export const createAuthHeader = (): string => {
 };
 
 export const jfApiClient = (args: {
+    forceRemoteUrl?: boolean;
     server: null | ServerListItemWithCredential;
     signal?: AbortSignal;
     url?: string;
 }) => {
-    const { server, signal, url } = args;
+    const { forceRemoteUrl, server, signal, url } = args;
 
     return initClient(contract, {
         api: async ({ body, headers, method, path }) => {
@@ -408,7 +480,8 @@ export const jfApiClient = (args: {
             const { params, path: api } = parsePath(path);
 
             if (server) {
-                baseUrl = `${server?.url}`;
+                const serverUrl = getServerUrl(server, forceRemoteUrl);
+                baseUrl = serverUrl;
                 token = server?.credential;
             } else {
                 baseUrl = url;
@@ -436,11 +509,7 @@ export const jfApiClient = (args: {
             } catch (e: any | AxiosError | Error) {
                 if (isAxiosError(e)) {
                     if (e.code === 'ERR_NETWORK') {
-                        throw new Error(
-                            i18n.t('error.networkError', {
-                                postProcess: 'sentenceCase',
-                            }) as string,
-                        );
+                        throw new Error(i18n.t('error.networkError') as string);
                     }
 
                     const error = e as AxiosError;

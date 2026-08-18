@@ -1,12 +1,11 @@
 import type { RefObject } from 'react';
+import type ReactPlayer from 'react-player';
 
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import ReactPlayer from 'react-player';
 
 import { AudioPlayer, PlayerOnProgressProps } from '/@/renderer/features/player/audio-player/types';
 import { convertToLogVolume } from '/@/renderer/features/player/audio-player/utils/player-utils';
-import { LogCategory, logFn } from '/@/renderer/utils/logger';
-import { logMsg } from '/@/renderer/utils/logger-message';
+import { logger } from '/@/renderer/utils/logger';
 import { PlayerStatus } from '/@/shared/types/types';
 
 export interface WebPlayerEngineHandle extends AudioPlayer {
@@ -23,8 +22,11 @@ export interface WebPlayerEngineHandle extends AudioPlayer {
 interface WebPlayerEngineProps {
     isMuted: boolean;
     isTransitioning: boolean;
+    loopPlayer1: boolean;
+    loopPlayer2: boolean;
     onEndedPlayer1: () => void;
     onEndedPlayer2: () => void;
+    onErrorPause: () => void;
     onProgressPlayer1: (e: PlayerOnProgressProps) => void;
     onProgressPlayer2: (e: PlayerOnProgressProps) => void;
     onStartedPlayer1: (player: ReactPlayer) => void;
@@ -39,6 +41,9 @@ interface WebPlayerEngineProps {
     volume: number;
 }
 
+const MAX_NETWORK_RETRIES = 5;
+const NETWORK_RETRY_DELAY_MS = 2000;
+
 // Credits: https://gist.github.com/novwhisky/8a1a0168b94f3b6abfaa?permalink_comment_id=1551393#gistcomment-1551393
 // This is used so that the player will always have an <audio> element. This means that
 // player1Source and player2Source are connected BEFORE the user presses play for
@@ -51,8 +56,11 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
     const {
         isMuted,
         isTransitioning,
+        loopPlayer1,
+        loopPlayer2,
         onEndedPlayer1,
         onEndedPlayer2,
+        onErrorPause,
         onProgressPlayer1,
         onProgressPlayer2,
         onStartedPlayer1,
@@ -69,6 +77,33 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
 
     const player1Ref = useRef<null | ReactPlayer>(null);
     const player2Ref = useRef<null | ReactPlayer>(null);
+    const networkRetryCount1 = useRef(0);
+    const networkRetryCount2 = useRef(0);
+    const [ReactPlayerComponent, setReactPlayerComponent] = useState<any>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadReactPlayer = async () => {
+            try {
+                const module = await import('react-player');
+                if (isMounted) {
+                    setReactPlayerComponent(() => module.default);
+                    setIsLoading(false);
+                }
+            } catch (error) {
+                console.error('Failed to load react-player:', error);
+                setIsLoading(false);
+            }
+        };
+
+        loadReactPlayer();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const [internalVolume1, setInternalVolume1] = useState(volume / 100 || 0);
     const [internalVolume2, setInternalVolume2] = useState(volume / 100 || 0);
@@ -87,6 +122,8 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
             player2Ref.current?.getInternalPlayer()?.pause();
         },
         play() {
+            player1Ref.current?.getInternalPlayer()?.pause();
+            player2Ref.current?.getInternalPlayer()?.pause();
             if (playerNum === 1) {
                 player1Ref.current?.getInternalPlayer()?.play();
             } else {
@@ -106,9 +143,15 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
             };
         },
         seekTo(seekTo: number) {
+            let type: 'fraction' | 'seconds' | undefined = undefined;
+
+            if (seekTo < 1) {
+                type = 'seconds';
+            }
+
             playerNum === 1
-                ? player1Ref.current?.seekTo(seekTo)
-                : player2Ref.current?.seekTo(seekTo);
+                ? player1Ref.current?.seekTo(seekTo, type)
+                : player2Ref.current?.seekTo(seekTo, type);
         },
         setVolume(volume: number) {
             setInternalVolume1(volume / 100 || 0);
@@ -125,7 +168,32 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
     const volume1 = convertToLogVolume(internalVolume1);
     const volume2 = convertToLogVolume(internalVolume2);
 
-    const handleOnError = (playerRef: React.RefObject<null | ReactPlayer>, onEnded: () => void) => {
+    const pauseBothPlayers = useCallback(() => {
+        player1Ref.current?.getInternalPlayer()?.pause();
+        player2Ref.current?.getInternalPlayer()?.pause();
+    }, []);
+
+    const mediaErrorLabel = (code: number | undefined) => {
+        switch (code) {
+            case MediaError.MEDIA_ERR_ABORTED:
+                return 'ABORTED';
+            case MediaError.MEDIA_ERR_DECODE:
+                return 'DECODE';
+            case MediaError.MEDIA_ERR_NETWORK:
+                return 'NETWORK';
+            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                return 'SRC_NOT_SUPPORTED';
+            default:
+                return 'unknown';
+        }
+    };
+
+    const handleOnError = (
+        playerRef: React.RefObject<null | ReactPlayer>,
+        onEnded: () => void,
+        onErrorPause: () => void,
+        networkRetryCountRef: React.RefObject<number>,
+    ) => {
         return ({ target }: ErrorEvent) => {
             const { current: player } = playerRef;
 
@@ -134,22 +202,82 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
             }
 
             const { error } = target;
+            const code = error?.code;
+            const label = mediaErrorLabel(code);
 
-            logFn.error(logMsg[LogCategory.PLAYER].playbackError, {
-                category: LogCategory.PLAYER,
-                meta: { error },
-            });
+            const isNetworkError =
+                code === MediaError.MEDIA_ERR_NETWORK ||
+                code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
 
-            if (
-                error?.code !== MediaError.MEDIA_ERR_DECODE &&
-                error?.code !== MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-            ) {
+            if (isNetworkError) {
+                if (networkRetryCountRef.current < MAX_NETWORK_RETRIES) {
+                    networkRetryCountRef.current += 1;
+                    logger.warn('Playback error, retrying', {
+                        code,
+                        label,
+                        retryCount: networkRetryCountRef.current,
+                    });
+                    const audio = target;
+                    setTimeout(() => {
+                        pauseBothPlayers();
+                        audio.load();
+                        audio.play().catch(() => {
+                            logger.error('Playback error, retries exhausted', {
+                                code,
+                                label,
+                                retryCount: networkRetryCountRef.current,
+                            });
+                        });
+                    }, NETWORK_RETRY_DELAY_MS);
+                    return;
+                }
+            }
+
+            if (code !== MediaError.MEDIA_ERR_DECODE && !isNetworkError) {
                 return;
             }
 
-            onEnded();
+            pauseBothPlayers();
+            if (code === MediaError.MEDIA_ERR_DECODE) {
+                logger.error('Playback decode error, skipping track', {
+                    code,
+                    label,
+                    retryCount: networkRetryCountRef.current,
+                });
+                onEnded();
+            } else {
+                logger.error('Playback error, pausing', {
+                    code,
+                    label,
+                    retryCount: networkRetryCountRef.current,
+                });
+                if (onErrorPause) {
+                    onErrorPause();
+                }
+            }
         };
     };
+
+    useEffect(() => {
+        networkRetryCount1.current = 0;
+        networkRetryCount2.current = 0;
+    }, [src1, src2]);
+
+    // When not playing, always pause both players — even during a transition
+    useEffect(() => {
+        if (playerStatus !== PlayerStatus.PLAYING) {
+            pauseBothPlayers();
+            return;
+        }
+        if (isTransitioning) {
+            return;
+        }
+        if (playerNum === 1) {
+            player2Ref.current?.getInternalPlayer()?.pause();
+        } else {
+            player1Ref.current?.getInternalPlayer()?.pause();
+        }
+    }, [isTransitioning, playerNum, playerStatus, pauseBothPlayers]);
 
     useEffect(() => {
         const player1 = player1Ref.current?.getInternalPlayer();
@@ -184,18 +312,28 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
         [onStartedPlayer2, preservesPitch],
     );
 
+    if (isLoading || !ReactPlayerComponent) {
+        return <div id="web-player-engine" style={{ display: 'none' }} />;
+    }
+
     return (
         <div id="web-player-engine" style={{ display: 'none' }}>
-            <ReactPlayer
+            <ReactPlayerComponent
                 config={{
                     file: { attributes: { crossOrigin: 'anonymous' }, forceAudio: true },
                 }}
                 controls={false}
                 height={0}
                 id="web-player-1"
+                loop={loopPlayer1}
                 muted={isMuted}
-                onEnded={src1 ? () => onEndedPlayer1() : undefined}
-                onError={handleOnError(player1Ref, () => onEndedPlayer1())}
+                onEnded={src1 && !loopPlayer1 ? () => onEndedPlayer1() : undefined}
+                onError={handleOnError(
+                    player1Ref,
+                    () => onEndedPlayer1(),
+                    onErrorPause,
+                    networkRetryCount1,
+                )}
                 onProgress={onProgressPlayer1}
                 onReady={handleOnReadyPlayer1}
                 playbackRate={speed || 1}
@@ -206,16 +344,22 @@ export const WebPlayerEngine = (props: WebPlayerEngineProps) => {
                 volume={volume1}
                 width={0}
             />
-            <ReactPlayer
+            <ReactPlayerComponent
                 config={{
                     file: { attributes: { crossOrigin: 'anonymous' }, forceAudio: true },
                 }}
                 controls={false}
                 height={0}
                 id="web-player-2"
+                loop={loopPlayer2}
                 muted={isMuted}
-                onEnded={src2 ? () => onEndedPlayer2() : undefined}
-                onError={handleOnError(player2Ref, () => onEndedPlayer2())}
+                onEnded={src2 && !loopPlayer2 ? () => onEndedPlayer2() : undefined}
+                onError={handleOnError(
+                    player2Ref,
+                    () => onEndedPlayer2(),
+                    onErrorPause,
+                    networkRetryCount2,
+                )}
                 onProgress={onProgressPlayer2}
                 onReady={handleOnReadyPlayer2}
                 playbackRate={speed || 1}

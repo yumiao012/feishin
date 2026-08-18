@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron';
 import Player from 'mpris-service';
 
-import { getMainWindow } from '/@/main/index';
+import { getMainWindow, showMainWindow } from '/@/main/index';
+import log from '/@/main/logger';
 import { QueueSong } from '/@/shared/types/domain-types';
 import { PlayerRepeat, PlayerStatus } from '/@/shared/types/types';
 
@@ -21,7 +22,7 @@ mprisPlayer.on('quit', () => {
 });
 
 const hasData = (): boolean => {
-    return mprisPlayer.metadata && !!mprisPlayer.metadata['mpris:length'];
+    return mprisPlayer.metadata && !!mprisPlayer.metadata['mpris:trackid'];
 };
 
 mprisPlayer.on('stop', () => {
@@ -108,7 +109,7 @@ mprisPlayer.on('seek', (event: number) => {
 });
 
 mprisPlayer.on('raise', () => {
-    getMainWindow()?.show();
+    showMainWindow();
 });
 
 ipcMain.on('update-position', (_event, arg: number) => {
@@ -124,7 +125,12 @@ ipcMain.on('update-volume', (_event, volume) => {
 });
 
 ipcMain.on('update-playback', (_event, status: PlayerStatus) => {
-    mprisPlayer.playbackStatus = status === PlayerStatus.PLAYING ? 'Playing' : 'Paused';
+    mprisPlayer.playbackStatus =
+        status === PlayerStatus.PLAYING
+            ? 'Playing'
+            : status === PlayerStatus.STOPPED
+              ? 'Stopped'
+              : 'Paused';
 });
 
 const REPEAT_TO_MPRIS: Record<PlayerRepeat, string> = {
@@ -147,6 +153,23 @@ ipcMain.on(
         try {
             if (!song?.id) {
                 mprisPlayer.metadata = {};
+                return;
+            }
+
+            // If the served id is an empty string, this is a radio
+            // Use a limited subset of the fields
+            if (song._serverId === '') {
+                // The id as passed in from use-mpris is radio- plus the radio ID
+                // If there are spaces or some other characters, this causes MPRIS to error and
+                // disconnect the bus. To prevent this, just use a fake track/radio
+                mprisPlayer.metadata = {
+                    'mpris:trackid': mprisPlayer.objectPath(`track/radio`),
+                    'xesam:album': song.album || null,
+                    'xesam:artist': song.artists?.length
+                        ? song.artists.map((artist) => artist.name)
+                        : null,
+                    'xesam:title': song.name || null,
+                };
                 return;
             }
 
@@ -180,7 +203,7 @@ ipcMain.on(
                 'xesam:userRating': song.userRating ? song.userRating / 5 : null,
             };
         } catch (err) {
-            console.error(err);
+            log.error(err);
         }
     },
 );

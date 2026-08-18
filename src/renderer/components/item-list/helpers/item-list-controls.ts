@@ -6,10 +6,14 @@ import { ItemListStateItemWithRequiredProperties } from '/@/renderer/components/
 import { DefaultItemControlProps, ItemControls } from '/@/renderer/components/item-list/types';
 import { ContextMenuController } from '/@/renderer/features/context-menu/context-menu-controller';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
+import { useSetFavorite } from '/@/renderer/features/shared/hooks/use-set-favorite';
+import { useSetRating } from '/@/renderer/features/shared/hooks/use-set-rating';
+import { useAppStore } from '/@/renderer/store';
 import { LibraryItem, QueueSong, Song } from '/@/shared/types/domain-types';
 import { Play, TableColumn } from '/@/shared/types/types';
 
 interface UseDefaultItemListControlsArgs {
+    enableMultiSelect?: boolean;
     onColumnReordered?: (
         columnIdFrom: TableColumn,
         columnIdTo: TableColumn,
@@ -33,12 +37,21 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
     const player = usePlayer();
     const navigate = useNavigate();
     const navigateRef = useRef(navigate);
+    const setFavorite = useSetFavorite();
+    const setRating = useSetRating();
+
+    const playerRef = useRef(player);
+    const setFavoriteRef = useRef(setFavorite);
+    const setRatingRef = useRef(setRating);
+    playerRef.current = player;
+    setFavoriteRef.current = setFavorite;
+    setRatingRef.current = setRating;
 
     useEffect(() => {
         navigateRef.current = navigate;
     }, [navigate]);
 
-    const { onColumnReordered, onColumnResized, overrides } = args || {};
+    const { enableMultiSelect = true, onColumnReordered, onColumnResized, overrides } = args || {};
 
     const controls: ItemControls = useMemo(() => {
         return {
@@ -187,11 +200,12 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                 onColumnReordered?.(columnIdFrom, columnIdTo, edge);
             },
 
-            onColumnResized: ({ columnId, width }: { columnId: TableColumn; width: number }) => {
-                onColumnResized?.(columnId, width);
-            },
+            onColumnResized: onColumnResized
+                ? ({ columnId, width }: { columnId: TableColumn; width: number }) =>
+                      onColumnResized(columnId, width)
+                : undefined,
 
-            onDoubleClick: ({ internalState, item, itemType }: DefaultItemControlProps) => {
+            onDoubleClick: ({ internalState, item, itemType, meta }: DefaultItemControlProps) => {
                 if (!item || !internalState) {
                     return;
                 }
@@ -212,7 +226,7 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                     }
                 }
 
-                if (itemType === LibraryItem.SONG) {
+                if (itemType === LibraryItem.SONG || itemType === LibraryItem.PLAYLIST_SONG) {
                     const data = internalState.getData();
                     const validSongs = data.filter((d): d is Song => {
                         if (!d || typeof d !== 'object') {
@@ -235,41 +249,63 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                         return;
                     }
 
-                    const songsBefore = 100;
-                    const songsAfter = 100;
-                    const startIndex = Math.max(0, clickedIndex - songsBefore);
-                    const endIndex = Math.min(validSongs.length, clickedIndex + songsAfter + 1);
-                    const songsToAdd = validSongs.slice(startIndex, endIndex);
+                    const playType = (meta?.playType as Play) || Play.NOW;
+                    const singleSongOnly = meta?.singleSongOnly === true;
+
+                    let songsToAdd: Song[];
+                    if (
+                        singleSongOnly ||
+                        playType === Play.NEXT ||
+                        playType === Play.LAST ||
+                        playType === Play.NEXT_SHUFFLE ||
+                        playType === Play.LAST_SHUFFLE
+                    ) {
+                        songsToAdd = [item as Song];
+                    } else {
+                        const songsBefore = 50;
+                        const songsAfter = 50;
+                        const startIndex = Math.max(0, clickedIndex - songsBefore);
+                        const endIndex = Math.min(validSongs.length, clickedIndex + songsAfter + 1);
+                        songsToAdd = validSongs.slice(startIndex, endIndex);
+                    }
 
                     if (songsToAdd.length === 0) {
                         return;
                     }
 
-                    player.addToQueueByData(songsToAdd, Play.NOW, item.id);
+                    playerRef.current.addToQueueByData(songsToAdd, playType, item.id);
                     return;
                 }
 
                 if (itemType === LibraryItem.QUEUE_SONG) {
                     const queueSong = item as QueueSong;
                     if (queueSong._uniqueId) {
-                        player.mediaPlay(queueSong._uniqueId);
+                        playerRef.current.mediaPlay(queueSong._uniqueId);
                     }
                 }
             },
 
-            onExpand: ({ internalState, item }: DefaultItemControlProps) => {
-                if (!item || !internalState) {
-                    return;
-                }
+            onExpand: ({ item, itemType }: DefaultItemControlProps) => {
+                if (!item) return;
 
-                // Extract rowId from the item
-                const rowId = internalState.extractRowId(item);
-                if (!rowId) return;
-
-                // Use the item directly (rowId is separate, used only as key in state)
                 const itemListItem = item as ItemListStateItemWithRequiredProperties;
+                const setGlobalExpanded = useAppStore.getState().actions.setGlobalExpanded;
+                const globalExpanded = useAppStore.getState().globalExpanded;
 
-                return internalState?.toggleExpanded(itemListItem);
+                if (globalExpanded?.item?.id === item.id) {
+                    setGlobalExpanded(null);
+                } else {
+                    const itemForStore: ItemListStateItemWithRequiredProperties & {
+                        imageId: null | string;
+                    } = {
+                        ...itemListItem,
+                        imageId: (itemListItem as { imageId?: null | string }).imageId ?? null,
+                    };
+                    setGlobalExpanded({
+                        item: itemForStore,
+                        itemType,
+                    });
+                }
             },
 
             onFavorite: ({
@@ -287,7 +323,7 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                     return;
                 }
 
-                player.setFavorite(item._serverId, [item.id], apiItemType, favorite);
+                setFavoriteRef.current(item._serverId, [item.id], apiItemType, favorite);
             },
 
             onMore: ({ event, internalState, item, itemType }: DefaultItemControlProps) => {
@@ -314,6 +350,13 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                 const rowId = internalState.extractRowId(item);
 
                 if (!rowId) return;
+
+                if (!enableMultiSelect) {
+                    return ContextMenuController.call({
+                        cmd: { items: [item] as any[], type: actualItemType as any },
+                        event,
+                    });
+                }
 
                 // If none selected, select this item
                 if (internalState.getSelected().length === 0) {
@@ -358,7 +401,7 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                     return;
                 }
 
-                player.addToQueueByFetch(item._serverId, [item.id], itemType, playType);
+                playerRef.current.addToQueueByFetch(item._serverId, [item.id], itemType, playType);
             },
 
             onRating: ({
@@ -384,12 +427,12 @@ export const useDefaultItemListControls = (args?: UseDefaultItemListControlsArgs
                     newRating = 0;
                 }
 
-                player.setRating(item._serverId, [item.id], apiItemType, newRating);
+                setRatingRef.current(item._serverId, [item.id], apiItemType, newRating);
             },
 
             ...overrides,
         };
-    }, [onColumnReordered, onColumnResized, overrides, player]);
+    }, [enableMultiSelect, overrides, onColumnReordered, onColumnResized]);
 
     return controls;
 };

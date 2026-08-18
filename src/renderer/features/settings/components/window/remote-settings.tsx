@@ -1,5 +1,6 @@
 import isElectron from 'is-electron';
 import debounce from 'lodash/debounce';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SettingsSection } from '/@/renderer/features/settings/components/settings-section';
@@ -12,7 +13,7 @@ import { toast } from '/@/shared/components/toast/toast';
 
 const remote = isElectron() ? window.api.remote : null;
 
-export const RemoteSettings = () => {
+export const RemoteSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useRemoteSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -25,16 +26,13 @@ export const RemoteSettings = () => {
         if (errorMsg === null) {
             setSettings({
                 remote: {
-                    ...settings,
                     enabled,
                 },
             });
         } else {
             toast.error({
                 message: errorMsg,
-                title: enabled
-                    ? t('error.remoteEnableError', { postProcess: 'sentenceCase' })
-                    : t('error.remoteDisableError', { postProcess: 'sentenceCase' }),
+                title: enabled ? t('error.remoteEnableError') : t('error.remoteDisableError'),
             });
         }
     }, 50);
@@ -44,17 +42,16 @@ export const RemoteSettings = () => {
         if (!errorMsg) {
             setSettings({
                 remote: {
-                    ...settings,
                     port,
                 },
             });
             toast.warn({
-                message: t('error.remotePortWarning', { postProcess: 'sentenceCase' }),
+                message: t('error.remotePortWarning'),
             });
         } else {
             toast.error({
                 message: errorMsg,
-                title: t('error.remotePortError', { postProcess: 'sentenceCase' }),
+                title: t('error.remotePortError'),
             });
         }
     }, 100);
@@ -76,7 +73,6 @@ export const RemoteSettings = () => {
                 <Text isMuted isNoSelect size="sm">
                     {t('setting.enableRemote', {
                         context: 'description',
-                        postProcess: 'sentenceCase',
                     })}{' '}
                     <a href={url} rel="noreferrer noopener" target="_blank">
                         {url}
@@ -84,7 +80,7 @@ export const RemoteSettings = () => {
                 </Text>
             ),
             isHidden,
-            title: t('setting.enableRemote', { postProcess: 'sentenceCase' }),
+            title: t('setting.enableRemote'),
         },
         {
             control: (
@@ -100,10 +96,9 @@ export const RemoteSettings = () => {
             ),
             description: t('setting.remotePort', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden,
-            title: t('setting.remotePort', { postProcess: 'sentenceCase' }),
+            title: t('setting.remotePort'),
         },
         {
             control: (
@@ -115,7 +110,6 @@ export const RemoteSettings = () => {
                         remote!.updateUsername(username);
                         setSettings({
                             remote: {
-                                ...settings,
                                 username,
                             },
                         });
@@ -124,10 +118,9 @@ export const RemoteSettings = () => {
             ),
             description: t('setting.remoteUsername', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden,
-            title: t('setting.remoteUsername', { postProcess: 'sentenceCase' }),
+            title: t('setting.remoteUsername'),
         },
         {
             control: (
@@ -139,7 +132,6 @@ export const RemoteSettings = () => {
                         remote!.updatePassword(password);
                         setSettings({
                             remote: {
-                                ...settings,
                                 password,
                             },
                         });
@@ -148,17 +140,11 @@ export const RemoteSettings = () => {
             ),
             description: t('setting.remotePassword', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden,
-            title: t('setting.remotePassword', { postProcess: 'sentenceCase' }),
+            title: t('setting.remotePassword'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={controlOptions}
-            title={t('page.setting.remote', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={controlOptions} title={t('page.setting.remote')} />;
+});

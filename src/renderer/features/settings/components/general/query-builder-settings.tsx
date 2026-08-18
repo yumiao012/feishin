@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -21,7 +22,7 @@ const QUERY_VALUE_INPUT_TYPES = [
     { label: 'String', value: 'string' },
 ] as const;
 
-export const QueryBuilderSettings = () => {
+export const QueryBuilderSettings = memo(() => {
     const { t } = useTranslation();
     const queryBuilder = useQueryBuilderSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -81,9 +82,7 @@ export const QueryBuilderSettings = () => {
                                         }
                                         placeholder={t(
                                             'setting.queryBuilderCustomFields_inputLabel',
-                                            {
-                                                postProcess: 'sentenceCase',
-                                            },
+                                            {},
                                         )}
                                         value={field.label}
                                         width="30%"
@@ -106,9 +105,7 @@ export const QueryBuilderSettings = () => {
                                         }
                                         placeholder={t(
                                             'setting.queryBuilderCustomFields_inputTag',
-                                            {
-                                                postProcess: 'sentenceCase',
-                                            },
+                                            {},
                                         )}
                                         value={field.value}
                                         width="30%"
@@ -125,27 +122,17 @@ export const QueryBuilderSettings = () => {
                     )}
                     <Group grow>
                         <Button onClick={handleAddCustomField} variant="filled">
-                            {t('common.add', { postProcess: 'titleCase' })}
+                            {t('common.add')}
                         </Button>
                     </Group>
                 </Stack>
             ),
             description: t('setting.queryBuilderCustomFields', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.queryBuilderCustomFields', {
-                postProcess: 'sentenceCase',
-            }),
+            title: t('setting.queryBuilderCustomFields'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={customFieldsOptions}
-            title={t('page.setting.queryBuilder', {
-                postProcess: 'sentenceCase',
-            })}
-        />
-    );
-};
+    return <SettingsSection options={customFieldsOptions} title={t('page.setting.queryBuilder')} />;
+});

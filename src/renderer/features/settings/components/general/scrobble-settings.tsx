@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -10,7 +11,7 @@ import { Slider } from '/@/shared/components/slider/slider';
 import { Switch } from '/@/shared/components/switch/switch';
 import { toast } from '/@/shared/components/toast/toast';
 
-export const ScrobbleSettings = () => {
+export const ScrobbleSettings = memo(() => {
     const { t } = useTranslation();
     const settings = usePlaybackSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -24,9 +25,7 @@ export const ScrobbleSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             playback: {
-                                ...settings,
                                 scrobble: {
-                                    ...settings.scrobble,
                                     enabled: e.currentTarget.checked,
                                 },
                             },
@@ -36,9 +35,8 @@ export const ScrobbleSettings = () => {
             ),
             description: t('setting.scrobble', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.scrobble', { postProcess: 'sentenceCase' }),
+            title: t('setting.scrobble'),
         },
         {
             control: (
@@ -51,9 +49,7 @@ export const ScrobbleSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             playback: {
-                                ...settings,
                                 scrobble: {
-                                    ...settings.scrobble,
                                     scrobbleAtPercentage: e,
                                 },
                             },
@@ -64,9 +60,8 @@ export const ScrobbleSettings = () => {
             ),
             description: t('setting.minimumScrobblePercentage', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.minimumScrobblePercentage', { postProcess: 'sentenceCase' }),
+            title: t('setting.minimumScrobblePercentage'),
         },
         {
             control: (
@@ -79,9 +74,7 @@ export const ScrobbleSettings = () => {
                         if (e === '') return;
                         setSettings({
                             playback: {
-                                ...settings,
                                 scrobble: {
-                                    ...settings.scrobble,
                                     scrobbleAtDuration: Number(e),
                                 },
                             },
@@ -92,9 +85,8 @@ export const ScrobbleSettings = () => {
             ),
             description: t('setting.minimumScrobbleSeconds', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.minimumScrobbleSeconds', { postProcess: 'sentenceCase' }),
+            title: t('setting.minimumScrobbleSeconds'),
         },
         {
             control: (
@@ -104,9 +96,7 @@ export const ScrobbleSettings = () => {
                     onChange={async (e) => {
                         if (Notification.permission === 'denied') {
                             toast.error({
-                                message: t('error.notificationDenied', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                message: t('error.notificationDenied'),
                             });
                             return;
                         }
@@ -115,9 +105,7 @@ export const ScrobbleSettings = () => {
                             const permissions = await Notification.requestPermission();
                             if (permissions !== 'granted') {
                                 toast.error({
-                                    message: t('error.notificationDenied', {
-                                        postProcess: 'sentenceCase',
-                                    }),
+                                    message: t('error.notificationDenied'),
                                 });
                                 return;
                             }
@@ -125,9 +113,7 @@ export const ScrobbleSettings = () => {
 
                         setSettings({
                             playback: {
-                                ...settings,
                                 scrobble: {
-                                    ...settings.scrobble,
                                     notify: e.currentTarget.checked,
                                 },
                             },
@@ -137,17 +123,11 @@ export const ScrobbleSettings = () => {
             ),
             description: t('setting.notify', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !('Notification' in window),
-            title: t('setting.notify', { postProcess: 'sentenceCase' }),
+            title: t('setting.notify'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={scrobbleOptions}
-            title={t('page.setting.scrobble', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={scrobbleOptions} title={t('page.setting.scrobble')} />;
+});

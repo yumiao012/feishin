@@ -1,118 +1,324 @@
-import { app, BrowserWindow, Menu, MenuItemConstructorOptions, shell } from 'electron';
+import { BrowserWindow, Menu, MenuItemConstructorOptions, shell } from 'electron';
 
-interface DarwinMenuItemConstructorOptions extends MenuItemConstructorOptions {
-    selector?: string;
-    submenu?: DarwinMenuItemConstructorOptions[] | Menu;
-}
+import packageJson from '../../package.json';
+
+import { store } from '/@/main/features/core/settings';
+import { PlayerRepeat, PlayerStatus } from '/@/shared/types/types';
+
+export type MenuPlaybackState = {
+    accelerators?: {
+        globalSearch?: string;
+        next?: string;
+        pause?: string;
+        play?: string;
+        playPause?: string;
+        previous?: string;
+        repeat?: string;
+        seekBackward?: string;
+        seekForward?: string;
+        shuffle?: string;
+        stop?: string;
+        volumeDown?: string;
+        volumeUp?: string;
+    };
+    inputFocused?: boolean;
+    playbackStatus?: PlayerStatus;
+    privateMode?: boolean;
+    repeatMode?: PlayerRepeat;
+    shuffleEnabled?: boolean;
+    sidebarCollapsed?: boolean;
+};
+
+const MENU_ITEM_IDS = {
+    next: 'playback-next',
+    pause: 'playback-pause',
+    play: 'playback-play',
+    previous: 'playback-previous',
+    privateMode: 'app-private-mode',
+    repeat: 'playback-repeat',
+    seekBackward: 'playback-seek-backward',
+    seekForward: 'playback-seek-forward',
+    shuffle: 'playback-shuffle',
+    sidebarCollapsed: 'view-sidebar-collapsed',
+    stop: 'playback-stop',
+    volumeDown: 'playback-volume-down',
+    volumeUp: 'playback-volume-up',
+} as const;
+
+const NON_TYPING_MODIFIERS = new Set([
+    'alt',
+    'cmd',
+    'command',
+    'commandorcontrol',
+    'control',
+    'ctrl',
+    'meta',
+    'option',
+    'super',
+]);
+
+const hasTypingSensitiveAccelerator = (accelerator?: string): boolean => {
+    if (!accelerator) return false;
+
+    const parts = accelerator.toLowerCase().split('+');
+    const key = parts.at(-1) || '';
+
+    if (/^f(?:[1-9]|1\d|2[0-4])$/.test(key) || /^(?:media|volume)/.test(key)) {
+        return false;
+    }
+
+    return !parts.some((part) => NON_TYPING_MODIFIERS.has(part));
+};
+
+const isPlaybackItemEnabled = (inputFocused: boolean, accelerator?: string): boolean => {
+    return !inputFocused || !hasTypingSensitiveAccelerator(accelerator);
+};
 
 export default class MenuBuilder {
+    applicationMenu: Menu | null = null;
+    developmentEnvironmentSetup = false;
     mainWindow: BrowserWindow;
 
     constructor(mainWindow: BrowserWindow) {
         this.mainWindow = mainWindow;
     }
 
-    buildDarwinTemplate(): MenuItemConstructorOptions[] {
-        const subMenuAbout: DarwinMenuItemConstructorOptions = {
+    buildDarwinTemplate({
+        accelerators,
+        inputFocused = false,
+        playbackStatus = PlayerStatus.PAUSED,
+        privateMode = false,
+        repeatMode = PlayerRepeat.NONE,
+        shuffleEnabled = false,
+        sidebarCollapsed = false,
+    }: MenuPlaybackState = {}): MenuItemConstructorOptions[] {
+        const isPlaying = playbackStatus === PlayerStatus.PLAYING;
+        const isRepeatEnabled = repeatMode !== PlayerRepeat.NONE;
+
+        const subMenuAbout: MenuItemConstructorOptions = {
             label: 'Electron',
             submenu: [
-                {
-                    label: 'About Feishin',
-                    selector: 'orderFrontStandardAboutPanel:',
-                },
-                { type: 'separator' },
-                { label: 'Services', submenu: [] },
+                { role: 'about' },
                 { type: 'separator' },
                 {
-                    accelerator: 'Command+H',
-                    label: 'Hide Feishin',
-                    selector: 'hide:',
-                },
-                {
-                    accelerator: 'Command+Shift+H',
-                    label: 'Hide Others',
-                    selector: 'hideOtherApplications:',
-                },
-                { label: 'Show All', selector: 'unhideAllApplications:' },
-                { type: 'separator' },
-                {
-                    accelerator: 'Command+Q',
+                    accelerator: 'Command+,',
                     click: () => {
-                        app.quit();
+                        this.mainWindow.webContents.send('renderer-open-settings');
                     },
-                    label: 'Quit',
+                    label: 'Settings...',
                 },
-            ],
-        };
-        const subMenuEdit: DarwinMenuItemConstructorOptions = {
-            label: 'Edit',
-            submenu: [
-                { accelerator: 'Command+Z', label: 'Undo', selector: 'undo:' },
-                { accelerator: 'Shift+Command+Z', label: 'Redo', selector: 'redo:' },
                 { type: 'separator' },
-                { accelerator: 'Command+X', label: 'Cut', selector: 'cut:' },
-                { accelerator: 'Command+C', label: 'Copy', selector: 'copy:' },
-                { accelerator: 'Command+V', label: 'Paste', selector: 'paste:' },
                 {
-                    accelerator: 'Command+A',
-                    label: 'Select All',
-                    selector: 'selectAll:',
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-open-manage-servers');
+                    },
+                    label: 'Manage Servers...',
                 },
+                {
+                    checked: privateMode,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-toggle-private-mode');
+                    },
+                    id: MENU_ITEM_IDS.privateMode,
+                    label: 'Private Session',
+                    type: 'checkbox',
+                },
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' },
             ],
         };
-        const subMenuViewDev: MenuItemConstructorOptions = {
+        const subMenuFile: MenuItemConstructorOptions = {
+            label: 'File',
+            submenu: [
+                {
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-open-create-playlist');
+                    },
+                    label: 'Create Playlist...',
+                },
+                { type: 'separator' },
+                { role: 'close' },
+            ],
+        };
+        const subMenuEdit: MenuItemConstructorOptions = { role: 'editMenu' };
+        const subMenuView: MenuItemConstructorOptions = {
             label: 'View',
             submenu: [
                 {
-                    accelerator: 'Command+R',
+                    accelerator: accelerators?.globalSearch,
                     click: () => {
-                        this.mainWindow.webContents.reload();
+                        this.mainWindow.webContents.send('renderer-open-command-palette');
                     },
-                    label: 'Reload',
+                    label: 'Command Palette...',
                 },
                 {
-                    accelerator: 'Ctrl+Command+F',
+                    checked: sidebarCollapsed,
                     click: () => {
-                        this.mainWindow.setFullScreen(!this.mainWindow.isFullScreen());
+                        this.mainWindow.webContents.send('renderer-toggle-sidebar');
                     },
-                    label: 'Toggle Full Screen',
+                    id: MENU_ITEM_IDS.sidebarCollapsed,
+                    label: 'Collapse Sidebar',
+                    type: 'checkbox',
                 },
-                {
-                    accelerator: 'Alt+Command+I',
-                    click: () => {
-                        this.mainWindow.webContents.toggleDevTools();
-                    },
-                    label: 'Toggle Developer Tools',
-                },
-            ],
-        };
-        const subMenuViewProd: MenuItemConstructorOptions = {
-            label: 'View',
-            submenu: [
-                {
-                    accelerator: 'Ctrl+Command+F',
-                    click: () => {
-                        this.mainWindow.setFullScreen(!this.mainWindow.isFullScreen());
-                    },
-                    label: 'Toggle Full Screen',
-                },
-            ],
-        };
-        const subMenuWindow: DarwinMenuItemConstructorOptions = {
-            label: 'Window',
-            submenu: [
-                {
-                    accelerator: 'Command+M',
-                    label: 'Minimize',
-                    selector: 'performMiniaturize:',
-                },
-                { accelerator: 'Command+W', label: 'Close', selector: 'performClose:' },
                 { type: 'separator' },
-                { label: 'Bring All to Front', selector: 'arrangeInFront:' },
+                { role: 'togglefullscreen' },
+                {
+                    label: 'Developer',
+                    submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }],
+                },
+            ],
+        };
+        const subMenuWindow: MenuItemConstructorOptions = {
+            role: 'windowMenu',
+            submenu:
+                store.get('window_exit_to_tray') && !this.mainWindow.isVisible()
+                    ? [
+                          {
+                              type: 'separator',
+                          },
+                          {
+                              accelerator: 'CmdOrCtrl+0',
+                              click: () => {
+                                  if (this.mainWindow.isMinimized()) {
+                                      this.mainWindow.restore();
+                                  }
+                                  this.mainWindow.setSkipTaskbar(false);
+                                  this.mainWindow.show();
+                                  this.mainWindow.focus();
+                              },
+                              label: 'Feishin',
+                          },
+                      ]
+                    : undefined,
+        };
+        const subMenuPlayback: MenuItemConstructorOptions = {
+            label: 'Playback',
+            submenu: [
+                {
+                    accelerator: accelerators?.play || accelerators?.playPause,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-play');
+                    },
+                    enabled: isPlaybackItemEnabled(
+                        inputFocused,
+                        accelerators?.play || accelerators?.playPause,
+                    ),
+                    id: MENU_ITEM_IDS.play,
+                    label: 'Play',
+                    visible: !isPlaying,
+                },
+                {
+                    accelerator: accelerators?.pause || accelerators?.playPause,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-pause');
+                    },
+                    enabled: isPlaybackItemEnabled(
+                        inputFocused,
+                        accelerators?.pause || accelerators?.playPause,
+                    ),
+                    id: MENU_ITEM_IDS.pause,
+                    label: 'Pause',
+                    visible: isPlaying,
+                },
+                { type: 'separator' },
+                {
+                    accelerator: accelerators?.next,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-next');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.next),
+                    id: MENU_ITEM_IDS.next,
+                    label: 'Next',
+                },
+                {
+                    accelerator: accelerators?.previous,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-previous');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.previous),
+                    id: MENU_ITEM_IDS.previous,
+                    label: 'Previous',
+                },
+                {
+                    accelerator: accelerators?.seekForward,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-skip-forward');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.seekForward),
+                    id: MENU_ITEM_IDS.seekForward,
+                    label: 'Seek Forward',
+                },
+                {
+                    accelerator: accelerators?.seekBackward,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-skip-backward');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.seekBackward),
+                    id: MENU_ITEM_IDS.seekBackward,
+                    label: 'Seek Backforward',
+                },
+                { type: 'separator' },
+                {
+                    accelerator: accelerators?.shuffle,
+                    checked: shuffleEnabled,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-toggle-shuffle');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.shuffle),
+                    id: MENU_ITEM_IDS.shuffle,
+                    label: 'Shuffle',
+                    type: 'checkbox',
+                },
+                {
+                    accelerator: accelerators?.repeat,
+                    checked: isRepeatEnabled,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-toggle-repeat');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.repeat),
+                    id: MENU_ITEM_IDS.repeat,
+                    label: 'Repeat',
+                    type: 'checkbox',
+                },
+                { type: 'separator' },
+                {
+                    accelerator: accelerators?.stop,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-stop');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.stop),
+                    id: MENU_ITEM_IDS.stop,
+                    label: 'Stop',
+                },
+                { type: 'separator' },
+                {
+                    accelerator: accelerators?.volumeUp,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-volume-up');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.volumeUp),
+                    id: MENU_ITEM_IDS.volumeUp,
+                    label: 'Volume Up',
+                },
+                {
+                    accelerator: accelerators?.volumeDown,
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-player-volume-down');
+                    },
+                    enabled: isPlaybackItemEnabled(inputFocused, accelerators?.volumeDown),
+                    id: MENU_ITEM_IDS.volumeDown,
+                    label: 'Volume Down',
+                },
             ],
         };
         const subMenuHelp: MenuItemConstructorOptions = {
-            label: 'Help',
+            role: 'help',
             submenu: [
                 {
                     click() {
@@ -140,19 +346,29 @@ export default class MenuBuilder {
                     },
                     label: 'Search Issues',
                 },
+                { type: 'separator' },
+                {
+                    click: () => {
+                        this.mainWindow.webContents.send('renderer-open-release-notes');
+                    },
+                    label: 'Version ' + packageJson.version,
+                },
             ],
         };
 
-        const subMenuView =
-            process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true'
-                ? subMenuViewDev
-                : subMenuViewProd;
-
-        return [subMenuAbout, subMenuEdit, subMenuView, subMenuWindow, subMenuHelp];
+        return [
+            subMenuAbout,
+            subMenuFile,
+            subMenuEdit,
+            subMenuView,
+            subMenuPlayback,
+            subMenuWindow,
+            subMenuHelp,
+        ];
     }
 
-    buildDefaultTemplate() {
-        const templateDefault = [
+    buildDefaultTemplate(): MenuItemConstructorOptions[] {
+        const templateDefault: MenuItemConstructorOptions[] = [
             {
                 label: '&File',
                 submenu: [
@@ -160,6 +376,14 @@ export default class MenuBuilder {
                         accelerator: 'Ctrl+O',
                         label: '&Open',
                     },
+                    {
+                        accelerator: 'Ctrl+,',
+                        click: () => {
+                            this.mainWindow.webContents.send('renderer-open-settings');
+                        },
+                        label: '&Settings...',
+                    },
+                    { type: 'separator' },
                     {
                         accelerator: 'Ctrl+W',
                         click: () => {
@@ -246,23 +470,31 @@ export default class MenuBuilder {
         return templateDefault;
     }
 
-    buildMenu(): Menu {
+    buildMenu(playbackState: MenuPlaybackState = {}): Menu {
         if (process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true') {
             this.setupDevelopmentEnvironment();
         }
 
         const template =
             process.platform === 'darwin'
-                ? this.buildDarwinTemplate()
+                ? this.buildDarwinTemplate(playbackState)
                 : this.buildDefaultTemplate();
 
         const menu = Menu.buildFromTemplate(template);
+        this.applicationMenu = menu;
         Menu.setApplicationMenu(menu);
 
         return menu;
     }
 
     setupDevelopmentEnvironment(): void {
+        // buildMenu can run multiple times as menu state updates; attach this once.
+        if (this.developmentEnvironmentSetup) {
+            return;
+        }
+
+        this.developmentEnvironmentSetup = true;
+
         this.mainWindow.webContents.on('context-menu', (_, props) => {
             const { x, y } = props;
 
@@ -275,5 +507,52 @@ export default class MenuBuilder {
                 },
             ]).popup({ window: this.mainWindow });
         });
+    }
+
+    updateMenu({
+        accelerators,
+        inputFocused = false,
+        playbackStatus = PlayerStatus.PAUSED,
+        privateMode = false,
+        repeatMode = PlayerRepeat.NONE,
+        shuffleEnabled = false,
+        sidebarCollapsed = false,
+    }: MenuPlaybackState = {}): void {
+        if (process.platform !== 'darwin' || !this.applicationMenu) {
+            return;
+        }
+
+        const privateModeItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.privateMode);
+        const sidebarItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.sidebarCollapsed);
+        const pauseItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.pause);
+        const playItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.play);
+        const repeatItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.repeat);
+        const shuffleItem = this.applicationMenu.getMenuItemById(MENU_ITEM_IDS.shuffle);
+
+        if (privateModeItem) privateModeItem.checked = privateMode;
+        if (sidebarItem) sidebarItem.checked = sidebarCollapsed;
+        if (pauseItem) pauseItem.visible = playbackStatus === PlayerStatus.PLAYING;
+        if (playItem) playItem.visible = playbackStatus !== PlayerStatus.PLAYING;
+        if (repeatItem) repeatItem.checked = repeatMode !== PlayerRepeat.NONE;
+        if (shuffleItem) shuffleItem.checked = shuffleEnabled;
+
+        const playbackAccelerators = [
+            [MENU_ITEM_IDS.play, accelerators?.play || accelerators?.playPause],
+            [MENU_ITEM_IDS.pause, accelerators?.pause || accelerators?.playPause],
+            [MENU_ITEM_IDS.next, accelerators?.next],
+            [MENU_ITEM_IDS.previous, accelerators?.previous],
+            [MENU_ITEM_IDS.seekForward, accelerators?.seekForward],
+            [MENU_ITEM_IDS.seekBackward, accelerators?.seekBackward],
+            [MENU_ITEM_IDS.shuffle, accelerators?.shuffle],
+            [MENU_ITEM_IDS.repeat, accelerators?.repeat],
+            [MENU_ITEM_IDS.stop, accelerators?.stop],
+            [MENU_ITEM_IDS.volumeUp, accelerators?.volumeUp],
+            [MENU_ITEM_IDS.volumeDown, accelerators?.volumeDown],
+        ] as const;
+
+        for (const [id, accelerator] of playbackAccelerators) {
+            const item = this.applicationMenu.getMenuItemById(id);
+            if (item) item.enabled = isPlaybackItemEnabled(inputFocused, accelerator);
+        }
     }
 }

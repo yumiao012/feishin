@@ -1,55 +1,57 @@
 import isElectron from 'is-electron';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ListConfigTable } from '/@/renderer/features/shared/components/list-config-menu';
+import { eventEmitter } from '/@/renderer/events/event-emitter';
+import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import {
+    getDefaultAudioDevice,
+    useAudioDevices,
+} from '/@/renderer/features/settings/components/playback/audio-settings';
+import {
+    ListConfigBooleanControl,
+    ListConfigTable,
+} from '/@/renderer/features/shared/components/list-config-menu';
+import {
+    usePlaybackType,
     usePlayerActions,
-    usePlayerData,
     usePlayerProperties,
-    usePlayerQueueType,
+    usePlayerSongProperties,
     usePlayerSpeed,
     usePlayerStatus,
 } from '/@/renderer/store';
 import {
-    useGeneralSettings,
+    useCombinedLyricsAndVisualizer,
+    useMicrotonalPitchControls,
     usePlaybackSettings,
     useSettingsStore,
     useSettingsStoreActions,
+    useShowLyricsInSidebar,
+    useShowQueueInSidebar,
+    useShowVisualizerInSidebar,
 } from '/@/renderer/store/settings.store';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
+import { Button } from '/@/shared/components/button/button';
+import { Group } from '/@/shared/components/group/group';
+import { Paper } from '/@/shared/components/paper/paper';
 import { Popover } from '/@/shared/components/popover/popover';
 import { SegmentedControl } from '/@/shared/components/segmented-control/segmented-control';
 import { Select } from '/@/shared/components/select/select';
 import { Slider } from '/@/shared/components/slider/slider';
-import { Switch } from '/@/shared/components/switch/switch';
-import { toast } from '/@/shared/components/toast/toast';
-import {
-    CrossfadeStyle,
-    PlayerQueueType,
-    PlayerStatus,
-    PlayerStyle,
-    PlayerType,
-} from '/@/shared/types/types';
+import { Stack } from '/@/shared/components/stack/stack';
+import { Text } from '/@/shared/components/text/text';
+import { CrossfadeStyle, PlayerStatus, PlayerStyle, PlayerType } from '/@/shared/types/types';
 
 const ipc = isElectron() ? window.api.ipc : null;
 
-const getAudioDevice = async () => {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return (devices || []).filter((dev: MediaDeviceInfo) => dev.kind === 'audiooutput');
-};
-
 export const PlayerConfig = () => {
     const { t } = useTranslation();
-    const { currentSong } = usePlayerData();
-    const speed = usePlayerSpeed();
-    const queueType = usePlayerQueueType();
-    const status = usePlayerStatus();
-    const { crossfadeDuration, crossfadeStyle, transitionType } = usePlayerProperties();
-    const { setCrossfadeDuration, setCrossfadeStyle, setQueueType, setSpeed, setTransitionType } =
-        usePlayerActions();
     const preservePitch = useSettingsStore((state) => state.playback.preservePitch);
-    const generalSettings = useGeneralSettings();
+    const showLyricsInSidebar = useShowLyricsInSidebar();
+    const showQueueInSidebar = useShowQueueInSidebar();
+    const showVisualizerInSidebar = useShowVisualizerInSidebar();
+    const combinedLyricsAndVisualizer = useCombinedLyricsAndVisualizer();
+    const { transitionType } = usePlayerProperties();
 
     const playbackSettings = usePlaybackSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -63,326 +65,148 @@ export const PlayerConfig = () => {
         [playbackSettings, setSettings],
     );
 
-    const [audioDevices, setAudioDevices] = useState<{ label: string; value: string }[]>([]);
-
-    useEffect(() => {
-        const fetchAudioDevices = () => {
-            getAudioDevice()
-                .then((dev) =>
-                    setAudioDevices(dev.map((d) => ({ label: d.label, value: d.deviceId }))),
-                )
-                .catch(() =>
-                    toast.error({
-                        message: t('error.audioDeviceFetchError', { postProcess: 'sentenceCase' }),
-                    }),
-                );
-        };
-
-        if (playbackSettings.type === PlayerType.WEB) {
-            fetchAudioDevices();
-        }
-    }, [playbackSettings.type, t]);
-
-    const options = useMemo(() => {
-        const formatPlaybackSpeedSliderLabel = (value: number) => {
-            const bpm = Number(currentSong?.bpm);
-            if (bpm > 0) {
-                return `${value} x / ${(bpm * value).toFixed(1)} BPM`;
-            }
-            return `${value} x`;
-        };
-
-        const allOptions = [
+    const audioOptions = useMemo(
+        () => [
             {
-                component: (
-                    <SegmentedControl
-                        data={[
-                            {
-                                label: t('player.queueType_default', { postProcess: 'titleCase' }),
-                                value: PlayerQueueType.DEFAULT,
-                            },
-                            {
-                                label: t('player.queueType_priority', { postProcess: 'titleCase' }),
-                                value: PlayerQueueType.PRIORITY,
-                            },
-                        ]}
-                        onChange={(value) => setQueueType(value as PlayerQueueType)}
-                        size="sm"
-                        value={queueType}
-                        w="100%"
-                    />
-                ),
-                id: 'queueType',
-                label: t('player.queueType', { postProcess: 'titleCase' }),
-            },
-            {
-                component: null,
-                id: 'divider-0',
-                isDivider: true,
-                label: '',
-            },
-            {
-                component: (
-                    <Select
-                        comboboxProps={{ withinPortal: false }}
-                        data={[
-                            {
-                                disabled: !isElectron(),
-                                label: 'MPV',
-                                value: PlayerType.LOCAL,
-                            },
-                            { label: 'Web', value: PlayerType.WEB },
-                        ]}
-                        defaultValue={playbackSettings.type}
-                        disabled={status === PlayerStatus.PLAYING}
-                        onChange={(e) => {
-                            setSettings({
-                                playback: { ...playbackSettings, type: e as PlayerType },
-                            });
-                            ipc?.send('settings-set', {
-                                property: 'playbackType',
-                                value: e,
-                            });
-                        }}
-                        width="100%"
-                    />
-                ),
+                component: <AudioPlayerTypeConfig />,
                 id: 'audioPlayerType',
-                label: t('setting.audioPlayer', { postProcess: 'titleCase' }),
+                label: t('setting.audioPlayer'),
             },
             {
-                component: (
-                    <Select
-                        clearable
-                        comboboxProps={{ withinPortal: false }}
-                        data={audioDevices}
-                        defaultValue={playbackSettings.audioDeviceId}
-                        disabled={playbackSettings.type !== PlayerType.WEB}
-                        onChange={(e) =>
-                            setSettings({
-                                playback: {
-                                    ...playbackSettings,
-                                    audioDeviceId: e,
-                                },
-                            })
-                        }
-                        width="100%"
-                    />
-                ),
+                component: <AudioDeviceConfig />,
                 id: 'audioDevice',
-                label: t('setting.audioDevice', { postProcess: 'titleCase' }),
+                label: t('setting.audioDevice'),
             },
+        ],
+        [t],
+    );
+
+    const transitionOptions = useMemo(
+        () => [
             {
-                component: null,
-                id: 'divider-1',
-                isDivider: true,
-                label: '',
-            },
-            {
-                component: (
-                    <SegmentedControl
-                        data={[
-                            {
-                                label: t('setting.playbackStyle', {
-                                    context: 'optionNormal',
-                                    postProcess: 'titleCase',
-                                }),
-                                value: PlayerStyle.GAPLESS,
-                            },
-                            {
-                                label: t('setting.playbackStyle', {
-                                    context: 'optionCrossFade',
-                                    postProcess: 'titleCase',
-                                }),
-                                value: PlayerStyle.CROSSFADE,
-                            },
-                        ]}
-                        disabled={
-                            playbackSettings.type !== PlayerType.WEB ||
-                            status === PlayerStatus.PLAYING
-                        }
-                        onChange={(value) => setTransitionType(value as PlayerStyle)}
-                        size="sm"
-                        value={transitionType}
-                        w="100%"
-                    />
-                ),
+                component: <TransitionTypeConfig />,
                 id: 'transitionType',
-                label: t('setting.playbackStyle', {
-                    postProcess: 'titleCase',
-                }),
+                label: t('setting.playbackStyle'),
             },
             {
-                component: (
-                    <Select
-                        comboboxProps={{ withinPortal: false }}
-                        data={[
-                            { label: 'Linear', value: CrossfadeStyle.LINEAR },
-                            { label: 'Equal Power', value: CrossfadeStyle.EQUAL_POWER },
-                            { label: 'S-Curve', value: CrossfadeStyle.S_CURVE },
-                            { label: 'Exponential', value: CrossfadeStyle.EXPONENTIAL },
-                        ]}
-                        defaultValue={crossfadeStyle}
-                        disabled={
-                            playbackSettings.type !== PlayerType.WEB ||
-                            transitionType !== PlayerStyle.CROSSFADE ||
-                            status === PlayerStatus.PLAYING
-                        }
-                        onChange={(e) => {
-                            if (e) {
-                                setCrossfadeStyle(e as CrossfadeStyle);
-                            }
-                        }}
-                        width="100%"
-                    />
-                ),
+                component: <CrossfadeStyleConfig />,
                 id: 'crossfadeStyle',
-                label: t('setting.crossfadeStyle', {
-                    postProcess: 'titleCase',
-                }),
+                isHidden: transitionType !== PlayerStyle.CROSSFADE,
+                label: t('setting.crossfadeStyle'),
             },
             {
-                component: (
-                    <Slider
-                        defaultValue={crossfadeDuration}
-                        disabled={
-                            playbackSettings.type !== PlayerType.WEB ||
-                            transitionType !== PlayerStyle.CROSSFADE ||
-                            status === PlayerStatus.PLAYING
-                        }
-                        marks={[
-                            { label: '3', value: 3 },
-                            { label: '6', value: 6 },
-                            { label: '9', value: 9 },
-                            { label: '12', value: 12 },
-                            { label: '15', value: 15 },
-                        ]}
-                        max={15}
-                        min={3}
-                        onChangeEnd={setCrossfadeDuration}
-                        styles={{
-                            root: {},
-                        }}
-                        w="100%"
-                    />
-                ),
+                component: <CrossfadeDurationConfig />,
                 id: 'crossfadeDuration',
-                label: t('setting.crossfadeDuration', {
-                    postProcess: 'titleCase',
-                }),
+                isHidden: transitionType !== PlayerStyle.CROSSFADE,
+                label: t('setting.crossfadeDuration'),
+            },
+        ],
+        [t, transitionType],
+    );
+
+    const playbackOptions = useMemo(
+        () => [
+            {
+                component: <PlaybackSpeedSlider />,
+                id: 'playbackSpeed',
+                label: t('player.playbackSpeed'),
             },
             {
-                component: null,
-                id: 'divider-2',
-                isDivider: true,
+                component: <PitchControls />,
+                id: 'pitchControls',
+                isHidden: preservePitch,
                 label: '',
             },
             {
                 component: (
-                    <Slider
-                        defaultValue={speed}
-                        label={formatPlaybackSpeedSliderLabel}
-                        marks={[
-                            { label: '0.5', value: 0.5 },
-                            { label: '0.75', value: 0.75 },
-                            { label: '1', value: 1 },
-                            { label: '1.25', value: 1.25 },
-                            { label: '1.5', value: 1.5 },
-                            { label: '1.75', value: 1.75 },
-                            { label: '2', value: 2 },
-                        ]}
-                        max={2}
-                        min={0.5}
-                        onChangeEnd={setSpeed}
-                        onDoubleClick={() => setSpeed(1)}
-                        step={0.01}
-                        styles={{
-                            markLabel: {},
-                            root: {},
-                        }}
-                        w="100%"
-                    />
-                ),
-                id: 'playbackSpeed',
-                label: t('player.playbackSpeed', { postProcess: 'titleCase' }),
-            },
-            {
-                component: (
-                    <Switch
-                        defaultChecked={preservePitch}
-                        onChange={(e) => setPreservePitch(e.currentTarget.checked)}
-                    />
+                    <ListConfigBooleanControl onChange={setPreservePitch} value={preservePitch} />
                 ),
                 id: 'preservePitch',
-                label: t('setting.preservePitch', { postProcess: 'titleCase' }),
+                label: t('setting.preservePitch'),
             },
-            {
-                component: null,
-                id: 'divider-3',
-                isDivider: true,
-                label: '',
-            },
+        ],
+        [preservePitch, setPreservePitch, t],
+    );
+
+    const sidebarOptions = useMemo(
+        () => [
             {
                 component: (
-                    <Switch
-                        defaultChecked={generalSettings.showLyricsInSidebar}
-                        onChange={(e) => {
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
                             setSettings({
                                 general: {
-                                    ...generalSettings,
-                                    showLyricsInSidebar: e.currentTarget.checked,
+                                    showQueueInSidebar: value,
                                 },
                             });
                         }}
+                        value={showQueueInSidebar}
+                    />
+                ),
+                id: 'showQueueInSidebar',
+                label: t('setting.showQueueInSidebar'),
+            },
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
+                            setSettings({
+                                general: {
+                                    showLyricsInSidebar: value,
+                                },
+                            });
+                        }}
+                        value={showLyricsInSidebar}
                     />
                 ),
                 id: 'showLyricsInSidebar',
-                label: t('setting.showLyricsInSidebar', { postProcess: 'titleCase' }),
+                label: t('setting.showLyricsInSidebar'),
             },
             {
                 component: (
-                    <Switch
-                        defaultChecked={generalSettings.showVisualizerInSidebar}
-                        onChange={(e) => {
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
                             setSettings({
                                 general: {
-                                    ...generalSettings,
-                                    showVisualizerInSidebar: e.currentTarget.checked,
+                                    showVisualizerInSidebar: value,
                                 },
                             });
                         }}
+                        value={showVisualizerInSidebar}
                     />
                 ),
                 id: 'showVisualizerInSidebar',
-                label: t('setting.showVisualizerInSidebar', { postProcess: 'titleCase' }),
+                label: t('setting.showVisualizerInSidebar'),
             },
-        ];
-
-        return allOptions;
-    }, [
-        t,
-        queueType,
-        playbackSettings,
-        status,
-        audioDevices,
-        transitionType,
-        crossfadeStyle,
-        crossfadeDuration,
-        setCrossfadeDuration,
-        speed,
-        setSpeed,
-        preservePitch,
-        currentSong?.bpm,
-        setQueueType,
-        setSettings,
-        setTransitionType,
-        setCrossfadeStyle,
-        setPreservePitch,
-        generalSettings,
-    ]);
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(value) => {
+                            setSettings({
+                                general: {
+                                    combinedLyricsAndVisualizer: value,
+                                },
+                            });
+                        }}
+                        value={combinedLyricsAndVisualizer}
+                    />
+                ),
+                id: 'combinedLyricsAndVisualizer',
+                label: t('setting.combinedLyricsAndVisualizer'),
+            },
+        ],
+        [
+            combinedLyricsAndVisualizer,
+            setSettings,
+            showLyricsInSidebar,
+            showQueueInSidebar,
+            showVisualizerInSidebar,
+            t,
+        ],
+    );
 
     return (
-        <Popover position="top" width={500}>
+        <Popover position="top" withArrow>
             <Popover.Target>
                 <ActionIcon
                     icon="mediaSettings"
@@ -390,16 +214,322 @@ export const PlayerConfig = () => {
                         size: 'lg',
                     }}
                     size="sm"
+                    stopsPropagation
                     tooltip={{
-                        label: t('common.setting_other', { postProcess: 'titleCase' }),
+                        label: t('common.setting', { count: 2 }),
                         openDelay: 0,
                     }}
                     variant="subtle"
                 />
             </Popover.Target>
-            <Popover.Dropdown>
-                <ListConfigTable options={options} />
+            <Popover.Dropdown maw={720} miw={540} onClick={(e) => e.stopPropagation()} p="sm">
+                <Stack gap="sm">
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={audioOptions} />
+                    </Paper>
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={transitionOptions} />
+                    </Paper>
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={playbackOptions} />
+                    </Paper>
+                    <Paper p="md" radius="md">
+                        <ListConfigTable options={sidebarOptions} />
+                    </Paper>
+                </Stack>
             </Popover.Dropdown>
         </Popover>
+    );
+};
+
+const AudioPlayerTypeConfig = () => {
+    const { t } = useTranslation();
+    const status = usePlayerStatus();
+    const playbackSettings = usePlaybackSettings();
+    const { setSettings } = useSettingsStoreActions();
+    const { mediaStop } = usePlayer();
+
+    const showRefreshButton = playbackSettings.type === PlayerType.LOCAL;
+
+    return (
+        <Group gap="xs" wrap="nowrap">
+            <Select
+                comboboxProps={{ withinPortal: false }}
+                data={[
+                    {
+                        disabled: !isElectron(),
+                        label: 'MPV',
+                        value: PlayerType.LOCAL,
+                    },
+                    { label: 'Web', value: PlayerType.WEB },
+                    { label: 'Jukebox', value: PlayerType.JUKEBOX },
+                ]}
+                defaultValue={playbackSettings.type}
+                disabled={status === PlayerStatus.PLAYING}
+                onChange={(e) => {
+                    setSettings({
+                        playback: { ...playbackSettings, type: e as PlayerType },
+                    });
+                    ipc?.send('settings-set', {
+                        property: 'playbackType',
+                        value: e,
+                    });
+                }}
+                variant="filled"
+                width="100%"
+            />
+            {showRefreshButton && (
+                <ActionIcon
+                    icon="refresh"
+                    iconProps={{ size: 'md' }}
+                    onClick={() => {
+                        mediaStop();
+                        eventEmitter.emit('MPV_RELOAD', {});
+                    }}
+                    tooltip={{ label: t('common.reload') }}
+                    variant="transparent"
+                />
+            )}
+        </Group>
+    );
+};
+
+const AudioDeviceConfig = () => {
+    const status = usePlayerStatus();
+    const playbackType = usePlaybackType();
+    const playbackSettings = usePlaybackSettings();
+    const { setSettings } = useSettingsStoreActions();
+
+    const audioDevices = useAudioDevices(playbackType);
+    const audioDeviceId =
+        playbackType === PlayerType.LOCAL
+            ? playbackSettings.mpvAudioDeviceId
+            : playbackSettings.audioDeviceId;
+
+    return (
+        <Select
+            comboboxProps={{ withinPortal: false }}
+            data={audioDevices}
+            disabled={status === PlayerStatus.PLAYING}
+            key={playbackType}
+            onChange={(e) => {
+                setSettings({
+                    playback: {
+                        ...playbackSettings,
+                        ...(playbackType === PlayerType.LOCAL
+                            ? { mpvAudioDeviceId: e }
+                            : { audioDeviceId: e }),
+                    },
+                });
+            }}
+            value={audioDeviceId ?? getDefaultAudioDevice(audioDevices, playbackType)}
+            variant="filled"
+            width="100%"
+        />
+    );
+};
+
+const TransitionTypeConfig = () => {
+    const { t } = useTranslation();
+    const status = usePlayerStatus();
+    const playbackSettings = usePlaybackSettings();
+    const { transitionType } = usePlayerProperties();
+    const { setTransitionType } = usePlayerActions();
+
+    return (
+        <SegmentedControl
+            data={[
+                {
+                    label: t('setting.playbackStyle', {
+                        context: 'optionNormal',
+                    }),
+                    value: PlayerStyle.GAPLESS,
+                },
+                {
+                    label: t('setting.playbackStyle', {
+                        context: 'optionCrossFade',
+                    }),
+                    value: PlayerStyle.CROSSFADE,
+                },
+            ]}
+            disabled={playbackSettings.type !== PlayerType.WEB || status === PlayerStatus.PLAYING}
+            onChange={(value) => setTransitionType(value as PlayerStyle)}
+            size="sm"
+            value={transitionType}
+            w="100%"
+        />
+    );
+};
+
+const CrossfadeStyleConfig = () => {
+    const status = usePlayerStatus();
+    const playbackSettings = usePlaybackSettings();
+    const { crossfadeStyle, transitionType } = usePlayerProperties();
+    const { setCrossfadeStyle } = usePlayerActions();
+
+    return (
+        <Select
+            comboboxProps={{ withinPortal: false }}
+            data={[
+                { label: 'Linear', value: CrossfadeStyle.LINEAR },
+                { label: 'Equal Power', value: CrossfadeStyle.EQUAL_POWER },
+                { label: 'S-Curve', value: CrossfadeStyle.S_CURVE },
+                { label: 'Exponential', value: CrossfadeStyle.EXPONENTIAL },
+            ]}
+            defaultValue={crossfadeStyle}
+            disabled={
+                playbackSettings.type !== PlayerType.WEB ||
+                transitionType !== PlayerStyle.CROSSFADE ||
+                status === PlayerStatus.PLAYING
+            }
+            onChange={(e) => {
+                if (e) {
+                    setCrossfadeStyle(e as CrossfadeStyle);
+                }
+            }}
+            variant="filled"
+            width="100%"
+        />
+    );
+};
+
+const CrossfadeDurationConfig = () => {
+    const status = usePlayerStatus();
+    const playbackSettings = usePlaybackSettings();
+    const { crossfadeDuration, transitionType } = usePlayerProperties();
+    const { setCrossfadeDuration } = usePlayerActions();
+
+    return (
+        <Slider
+            defaultValue={crossfadeDuration}
+            disabled={
+                playbackSettings.type !== PlayerType.WEB ||
+                transitionType !== PlayerStyle.CROSSFADE ||
+                status === PlayerStatus.PLAYING
+            }
+            marks={[
+                { label: '3', value: 3 },
+                { label: '6', value: 6 },
+                { label: '9', value: 9 },
+                { label: '12', value: 12 },
+                { label: '15', value: 15 },
+            ]}
+            max={15}
+            min={3}
+            onChangeEnd={setCrossfadeDuration}
+            styles={{
+                root: {},
+            }}
+            w="100%"
+        />
+    );
+};
+
+export const PlaybackSpeedSlider = () => {
+    const speed = usePlayerSpeed();
+    const { setSpeed } = usePlayerActions();
+    const { bpm } = usePlayerSongProperties(['bpm']) ?? {};
+
+    const formatPlaybackSpeedSliderLabel = useMemo(
+        () => (value: number) => {
+            const bpmValue = Number(bpm);
+            if (bpmValue > 0) {
+                return `${value.toFixed(2)} x / ${(bpmValue * value).toFixed(1)} BPM`;
+            }
+            return `${value.toFixed(2)} x`;
+        },
+        [bpm],
+    );
+
+    return (
+        <Slider
+            label={formatPlaybackSpeedSliderLabel}
+            marks={[
+                { label: '0.5', value: 0.5 },
+                { label: '0.75', value: 0.75 },
+                { label: '1', value: 1 },
+                { label: '1.25', value: 1.25 },
+                { label: '1.5', value: 1.5 },
+                { label: '1.75', value: 1.75 },
+                { label: '2', value: 2 },
+            ]}
+            max={2}
+            min={0.5}
+            onChange={setSpeed}
+            onDoubleClick={() => setSpeed(1)}
+            step={0.01}
+            value={speed}
+            w="320px"
+        />
+    );
+};
+
+export const PitchControls = () => {
+    const microtonal = useMicrotonalPitchControls();
+    const speed = usePlayerSpeed();
+    const { setSpeed } = usePlayerActions();
+
+    const speedToPitch = (speed: number) => {
+        return 12 * Math.log2(speed);
+    };
+
+    const pitchToSpeed = (pitch: number) => {
+        return 2 ** (pitch / 12);
+    };
+
+    const adjustMusicalSpeed = (adjustment: number) => {
+        const curPitch = speedToPitch(speed);
+        const newSpeed = pitchToSpeed(curPitch + adjustment);
+        setSpeed(newSpeed);
+    };
+
+    return (
+        <Group gap={microtonal ? 'xs' : 'md'} my="md" w="100%" wrap="nowrap">
+            <Button
+                aria-label="-1 semitone"
+                fullWidth
+                fw={400}
+                onClick={() => adjustMusicalSpeed(-1)}
+                size="compact-xs"
+            >
+                -1st
+            </Button>
+            {microtonal && (
+                <Button
+                    aria-label="-10 cents"
+                    fullWidth
+                    fw={400}
+                    onClick={() => adjustMusicalSpeed(-0.1)}
+                    size="compact-xs"
+                >
+                    -10ct
+                </Button>
+            )}
+            <Text size="sm" style={{ fontFamily: 'monospace' }} ta="center">
+                {speed.toFixed(2)}x {speedToPitch(speed) > 0 && '+'}
+                {speedToPitch(speed) == 0 && '±'}
+                {speedToPitch(speed).toFixed(2)}st
+            </Text>
+            {microtonal && (
+                <Button
+                    aria-label="+10 cents"
+                    fullWidth
+                    fw={400}
+                    onClick={() => adjustMusicalSpeed(0.1)}
+                    size="compact-xs"
+                >
+                    +10ct
+                </Button>
+            )}
+            <Button
+                aria-label="+1 semitone"
+                fullWidth
+                fw={400}
+                onClick={() => adjustMusicalSpeed(1)}
+                size="compact-xs"
+            >
+                +1st
+            </Button>
+        </Group>
     );
 };

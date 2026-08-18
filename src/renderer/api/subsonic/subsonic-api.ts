@@ -1,15 +1,19 @@
 import { initClient, initContract } from '@ts-rest/core';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse, isAxiosError } from 'axios';
-import omitBy from 'lodash/omitBy';
 import qs from 'qs';
 import { z } from 'zod';
 
 import i18n from '/@/i18n/i18n';
+import { authenticationFailure } from '/@/renderer/api/utils';
+import { useAuthStore } from '/@/renderer/store';
+import { getServerUrl } from '/@/renderer/utils/normalize-server-url';
 import { ssType } from '/@/shared/api/subsonic/subsonic-types';
 import { hasFeature } from '/@/shared/api/utils';
 import { toast } from '/@/shared/components/toast/toast';
 import { ServerListItemWithCredential } from '/@/shared/types/domain-types';
 import { ServerFeature } from '/@/shared/types/features-types';
+
+const SUBSONIC_AUTH_ERROR_CODE = 40;
 
 const c = initContract();
 
@@ -94,12 +98,12 @@ export const contract = c.router({
             200: ssType._response.getArtist,
         },
     },
-    getArtistInfo: {
+    getArtistInfo2: {
         method: 'GET',
-        path: 'getArtistInfo.view',
+        path: 'getArtistInfo2.view',
         query: ssType._parameters.artistInfo,
         responses: {
-            200: ssType._response.artistInfo,
+            200: ssType._response.artistInfo2,
         },
     },
     getArtists: {
@@ -186,6 +190,14 @@ export const contract = c.router({
             200: ssType._response.randomSongList,
         },
     },
+    getScanStatus: {
+        method: 'GET',
+        path: 'getScanStatus.view',
+        query: ssType._parameters.getScanStatus,
+        responses: {
+            200: ssType._response.getScanStatus,
+        },
+    },
     getServerInfo: {
         method: 'GET',
         path: 'getOpenSubsonicExtensions.view',
@@ -249,12 +261,37 @@ export const contract = c.router({
             200: ssType._response.topSongsList,
         },
     },
+    getTranscodeDecision: {
+        body: ssType._body.getTranscodeDecision,
+        method: 'POST',
+        path: 'getTranscodeDecision.view',
+        query: ssType._parameters.getTranscodeDecision,
+        responses: {
+            200: ssType._response.getTranscodeDecision,
+        },
+    },
+    getTranscodeStream: {
+        method: 'GET',
+        path: 'getTranscodeStream.view',
+        query: ssType._parameters.getTranscodeStream,
+        responses: {
+            200: z.string(),
+        },
+    },
     getUser: {
         method: 'GET',
         path: 'getUser.view',
         query: ssType._parameters.user,
         responses: {
             200: ssType._response.user,
+        },
+    },
+    jukeboxControl: {
+        method: 'GET',
+        path: 'jukeboxControl.view',
+        query: ssType._parameters.jukeboxControl,
+        responses: {
+            200: ssType._response.jukeboxControl,
         },
     },
     ping: {
@@ -270,6 +307,14 @@ export const contract = c.router({
         query: ssType._parameters.removeFavorite,
         responses: {
             200: ssType._response.removeFavorite,
+        },
+    },
+    reportPlayback: {
+        method: 'GET',
+        path: 'reportPlayback.view',
+        query: ssType._parameters.reportPlayback,
+        responses: {
+            200: ssType._response.reportPlayback,
         },
     },
     savePlayQueue: {
@@ -312,6 +357,14 @@ export const contract = c.router({
             200: ssType._response.setRating,
         },
     },
+    startScan: {
+        method: 'GET',
+        path: 'startScan.view',
+        query: ssType._parameters.startScan,
+        responses: {
+            200: ssType._response.startScan,
+        },
+    },
     updateInternetRadioStation: {
         method: 'GET',
         path: 'updateInternetRadioStation.view',
@@ -342,13 +395,25 @@ axiosClient.interceptors.response.use(
         if (data['subsonic-response'].status !== 'ok') {
             // Suppress code related to non-linked lastfm or spotify from Navidrome
             if (data['subsonic-response'].error.code !== 0) {
-                toast.error({
-                    message: data['subsonic-response'].error.message,
-                    title: i18n.t('error.genericError', { postProcess: 'sentenceCase' }) as string,
-                });
+                const currentServer = useAuthStore.getState().currentServer;
+                const isAuthenticated = Boolean(currentServer?.credential);
+                const errorCode = data['subsonic-response'].error.code;
+                const errorMessage = data['subsonic-response'].error.message as string | undefined;
+                // Servers may return code as string ("40") — coerce before comparing
+                const numericCode = Number(errorCode);
+                const isAuthError = numericCode === SUBSONIC_AUTH_ERROR_CODE;
+
+                if (isAuthenticated && isAuthError) {
+                    authenticationFailure(currentServer, errorMessage);
+                } else if (isAuthenticated) {
+                    toast.error({
+                        message: errorMessage,
+                        title: i18n.t('error.genericError') as string,
+                    });
+                }
 
                 // Since we do status === 200, override this value with the error code
-                response.status = data['subsonic-response'].error.code;
+                response.status = numericCode || errorCode;
             }
         }
 
@@ -359,11 +424,39 @@ axiosClient.interceptors.response.use(
     },
 );
 
+const keysToSkipEmptyCheck = new Set([
+    'artist',
+    'comment',
+    'genre',
+    'name',
+    'query',
+    'u',
+    'username',
+]);
+
 const parsePath = (fullPath: string) => {
     const [path, params] = fullPath.split('?');
 
-    const parsedParams = qs.parse(params, { arrayLimit: 99999, parameterLimit: 99999 });
-    const notNilParams = omitBy(parsedParams, (value) => value === 'undefined' || value === 'null');
+    const url = new URLSearchParams(params);
+    const notNilParams: Record<string, string[]> = {};
+
+    for (const [key, value] of url) {
+        if (!keysToSkipEmptyCheck.has(key) && (value === 'undefined' || value === 'null')) {
+            continue;
+        }
+
+        let realKey = key;
+
+        if (key.includes('[') && key.includes(']')) {
+            realKey = key.split('[')[0];
+        }
+
+        if (realKey in notNilParams) {
+            notNilParams[realKey].push(value);
+        } else {
+            notNilParams[realKey] = [value];
+        }
+    }
 
     return {
         params: notNilParams,
@@ -383,22 +476,28 @@ const silentlyTransformResponse = (data: any) => {
 };
 
 export const ssApiClient = (args: {
+    forceRemoteUrl?: boolean;
     server: null | ServerListItemWithCredential;
     signal?: AbortSignal;
     silent?: boolean;
     url?: string;
 }) => {
-    const { server, signal, silent, url } = args;
+    const { forceRemoteUrl, server, signal, silent, url } = args;
 
     return initClient(contract, {
-        api: async ({ headers, method, path }) => {
+        api: async ({ body, headers, method, path, rawQuery }) => {
+            if (server && !server.credential) {
+                throw new Error('Not authenticated');
+            }
+
             let baseUrl: string | undefined;
             const authParams: Record<string, any> = {};
 
             const { params, path: api } = parsePath(path);
 
             if (server) {
-                baseUrl = `${server.url}/rest`;
+                const serverUrl = getServerUrl(server, forceRemoteUrl);
+                baseUrl = serverUrl ? `${serverUrl}/rest` : undefined;
                 const token = server.credential;
                 const params = token.split(/&?\w=/gm);
 
@@ -421,19 +520,44 @@ export const ssApiClient = (args: {
                 url: `${baseUrl}/${api}`,
             };
 
-            const data = {
-                c: 'Feishin',
-                f: 'json',
-                v: '1.13.0',
-                ...authParams,
-                ...params,
-            };
+            const isGetTranscodeDecisionPost =
+                method === 'POST' && api === 'getTranscodeDecision.view';
 
-            if (hasFeature(server, ServerFeature.OS_FORM_POST)) {
+            if (isGetTranscodeDecisionPost && body != null) {
+                request.method = 'POST';
+                request.headers = {
+                    ...headers,
+                    'Content-Type': 'application/json',
+                };
+                request.data = body;
+                request.params = {
+                    c: 'Feishin',
+                    f: 'json',
+                    v: '1.13.0',
+                    ...authParams,
+                    ...(typeof rawQuery === 'object' && rawQuery !== null
+                        ? (rawQuery as Record<string, unknown>)
+                        : {}),
+                };
+            } else if (hasFeature(server, ServerFeature.OS_FORM_POST)) {
                 headers['Content-Type'] = 'application/x-www-form-urlencoded';
                 request.method = 'POST';
+                const data = {
+                    c: 'Feishin',
+                    f: 'json',
+                    v: '1.13.0',
+                    ...authParams,
+                    ...params,
+                };
                 request.data = qs.stringify(data, { arrayFormat: 'repeat' });
             } else {
+                const data = {
+                    c: 'Feishin',
+                    f: 'json',
+                    v: '1.13.0',
+                    ...authParams,
+                    ...params,
+                };
                 request.method = method;
                 request.params = data;
             }
@@ -452,11 +576,7 @@ export const ssApiClient = (args: {
             } catch (e: any | AxiosError | Error) {
                 if (isAxiosError(e)) {
                     if (e.code === 'ERR_NETWORK') {
-                        throw new Error(
-                            i18n.t('error.networkError', {
-                                postProcess: 'sentenceCase',
-                            }) as string,
-                        );
+                        throw new Error(i18n.t('error.networkError') as string);
                     }
 
                     const error = e as AxiosError;

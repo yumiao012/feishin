@@ -1,4 +1,4 @@
-import { PostProcessorModule, TOptions } from 'i18next';
+import { PostProcessorModule } from 'i18next';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
@@ -8,6 +8,7 @@ import cs from './locales/cs.json';
 import de from './locales/de.json';
 import en from './locales/en.json';
 import es from './locales/es.json';
+import et from './locales/et.json';
 import eu from './locales/eu.json';
 import fa from './locales/fa.json';
 import fi from './locales/fi.json';
@@ -17,6 +18,7 @@ import id from './locales/id.json';
 import it from './locales/it.json';
 import ja from './locales/ja.json';
 import ko from './locales/ko.json';
+import lv from './locales/lv.json';
 import nbNO from './locales/nb-NO.json';
 import nl from './locales/nl.json';
 import pl from './locales/pl.json';
@@ -27,6 +29,8 @@ import sl from './locales/sl.json';
 import sr from './locales/sr.json';
 import sv from './locales/sv.json';
 import ta from './locales/ta.json';
+import th from './locales/th.json';
+import tl from './locales/tl.json';
 import tr from './locales/tr.json';
 import zhHans from './locales/zh-Hans.json';
 import zhHant from './locales/zh-Hant.json';
@@ -38,6 +42,7 @@ const resources = {
     de: { translation: de },
     en: { translation: en },
     es: { translation: es },
+    et: { translation: et },
     eu: { translation: eu },
     fa: { translation: fa },
     fi: { translation: fi },
@@ -47,6 +52,7 @@ const resources = {
     it: { translation: it },
     ja: { translation: ja },
     ko: { translation: ko },
+    lv: { translation: lv },
     'nb-NO': { translation: nbNO },
     nl: { translation: nl },
     pl: { translation: pl },
@@ -57,6 +63,8 @@ const resources = {
     sr: { translation: sr },
     sv: { translation: sv },
     ta: { translation: ta },
+    th: { translation: th },
+    tl: { translation: tl },
     tr: { translation: tr },
     'zh-Hans': { translation: zhHans },
     'zh-Hant': { translation: zhHant },
@@ -86,6 +94,10 @@ export const languages = [
     {
         label: 'Español',
         value: 'es',
+    },
+    {
+        label: 'Eesti',
+        value: 'et',
     },
     {
         label: 'Basque',
@@ -118,6 +130,10 @@ export const languages = [
     {
         label: '한국어',
         value: 'ko',
+    },
+    {
+        label: 'Latviešu',
+        value: 'lv',
     },
     {
         label: 'Nederlands',
@@ -164,6 +180,14 @@ export const languages = [
         value: 'ta',
     },
     {
+        label: 'Thai',
+        value: 'th',
+    },
+    {
+        label: 'Tagalog',
+        value: 'tl',
+    },
+    {
         label: 'Türkçe',
         value: 'tr',
     },
@@ -203,25 +227,17 @@ const titleCasePostProcessor: PostProcessorModule = {
     type: 'postProcessor',
 };
 
-const ignoreSentenceCaseLanguages = ['de'];
+// const ignoreSentenceCaseLanguages = ['de'];
 
 const sentenceCasePostProcessor: PostProcessorModule = {
     name: 'sentenceCase',
-    process: (
-        value: string,
-        _key: string,
-        _options: TOptions<Record<string, string>>,
-        translator: any,
-    ) => {
+    process: (value: string) => {
         const sentences = value.split('. ');
 
         return sentences
             .map((sentence) => {
                 return (
-                    sentence.charAt(0).toLocaleUpperCase() +
-                    (!ignoreSentenceCaseLanguages.includes(translator.language)
-                        ? sentence.slice(1).toLocaleLowerCase()
-                        : sentence.slice(1))
+                    sentence.charAt(0).toLocaleUpperCase() + sentence.slice(1).toLocaleLowerCase()
                 );
             })
             .join('. ');

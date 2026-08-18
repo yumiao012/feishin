@@ -11,20 +11,26 @@ import {
 import { disableNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/element/disable-native-drag-preview';
 import clsx from 'clsx';
 import Fuse, { type FuseResultMatch } from 'fuse.js';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import styles from './table-config.module.css';
 
 import { ItemTableListColumnConfig } from '/@/renderer/components/item-list/types';
+import { AlbumGroupMetadataConfig } from '/@/renderer/features/shared/components/album-group-metadata-config';
 import {
     ListConfigBooleanControl,
     ListConfigTable,
 } from '/@/renderer/features/shared/components/list-config-menu';
-import { ItemListSettings, useSettingsStore, useSettingsStoreActions } from '/@/renderer/store';
-import { Accordion } from '/@/shared/components/accordion/accordion';
+import {
+    type DataTableProps,
+    ItemListSettings,
+    useSettingsStore,
+    useSettingsStoreActions,
+} from '/@/renderer/store';
 import { ActionIcon, ActionIconGroup } from '/@/shared/components/action-icon/action-icon';
 import { Badge } from '/@/shared/components/badge/badge';
+import { Button } from '/@/shared/components/button/button';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { Divider } from '/@/shared/components/divider/divider';
 import { Group } from '/@/shared/components/group/group';
@@ -37,9 +43,10 @@ import { Text } from '/@/shared/components/text/text';
 import { Tooltip } from '/@/shared/components/tooltip/tooltip';
 import { useDebouncedState } from '/@/shared/hooks/use-debounced-state';
 import { dndUtils, DragData, DragOperation, DragTarget } from '/@/shared/types/drag-and-drop';
-import { ItemListKey, ListPaginationType } from '/@/shared/types/types';
+import { ItemListKey, ListPaginationType, TableColumn } from '/@/shared/types/types';
 
 interface TableConfigProps {
+    enablePinColumnButtons?: boolean;
     extraOptions?: {
         component: React.ReactNode;
         id: string;
@@ -53,35 +60,170 @@ interface TableConfigProps {
         };
     };
     tableColumnsData: { label: string; value: string }[];
+    tableKey?: 'detail' | 'main';
 }
 
 export const TableConfig = ({
+    enablePinColumnButtons = true,
     extraOptions,
     listKey,
     optionsConfig,
     tableColumnsData,
+    tableKey = 'main',
 }: TableConfigProps) => {
     const { t } = useTranslation();
 
     const list = useSettingsStore((state) => state.lists[listKey]) as ItemListSettings;
-    const { setList } = useSettingsStoreActions();
+    const albumGroupImageSize = useSettingsStore((state) => state.general.albumGroupImageSize);
+    const albumGroupShowFavoriteRating = useSettingsStore(
+        (state) => state.general.albumGroupShowFavoriteRating,
+    );
+    const albumGroupVerticalLayout = useSettingsStore(
+        (state) => state.general.albumGroupVerticalLayout,
+    );
+    const imageResTable = useSettingsStore((state) => state.general.imageRes.table);
+    const { setList, setSettings } = useSettingsStoreActions();
+    const [albumGroupOpen, setAlbumGroupOpen] = useState(false);
+
+    const table = tableKey === 'detail' ? (list?.detail ?? list?.table) : list?.table;
+
+    const hasAlbumGroupColumn = useMemo(
+        () => table.columns.some((column) => column.id === TableColumn.ALBUM_GROUP),
+        [table.columns],
+    );
+
+    const setTableUpdate = useCallback(
+        (patch: Partial<DataTableProps>) => {
+            if (tableKey === 'detail') {
+                setList(listKey, { detail: patch } as Parameters<
+                    ReturnType<typeof useSettingsStoreActions>['setList']
+                >[1]);
+            } else {
+                setList(listKey, { table: patch });
+            }
+        },
+        [listKey, setList, tableKey],
+    );
 
     const advancedSettings = useMemo(() => {
+        const albumGroupOptions =
+            hasAlbumGroupColumn && tableKey === 'main'
+                ? [
+                      {
+                          component: (
+                              <Group justify="flex-end" w="100%">
+                                  <Button
+                                      onClick={() => setAlbumGroupOpen((prev) => !prev)}
+                                      size="compact-md"
+                                      variant={albumGroupOpen ? 'subtle' : 'filled'}
+                                  >
+                                      {t(albumGroupOpen ? 'common.close' : 'common.edit')}
+                                  </Button>
+                              </Group>
+                          ),
+                          id: 'albumGroupConfig',
+                          label: t('table.config.general.albumGroupConfig'),
+                      },
+                      ...(albumGroupOpen
+                          ? [
+                                {
+                                    component: (
+                                        <Group justify="flex-end" w="100%">
+                                            <NumberInput
+                                                max={2000}
+                                                min={0}
+                                                onChange={(value) => {
+                                                    const size = Math.max(
+                                                        0,
+                                                        Math.min(
+                                                            2000,
+                                                            typeof value === 'number' ? value : 0,
+                                                        ),
+                                                    );
+                                                    setSettings({
+                                                        general: {
+                                                            albumGroupImageSize: size,
+                                                            // Source table art must be at least as
+                                                            // large as the displayed album image.
+                                                            ...(size >= imageResTable
+                                                                ? { imageRes: { table: size } }
+                                                                : {}),
+                                                        },
+                                                    });
+                                                }}
+                                                rightSection={
+                                                    <Text isMuted isNoSelect pr="lg" size="sm">
+                                                        px
+                                                    </Text>
+                                                }
+                                                value={albumGroupImageSize}
+                                                width={90}
+                                            />
+                                        </Group>
+                                    ),
+                                    id: 'albumImageSize',
+                                    label: (
+                                        <Text fw={500} pl="md" size="sm">
+                                            {t('table.config.general.albumImageSize')}
+                                        </Text>
+                                    ),
+                                },
+                                {
+                                    component: (
+                                        <ListConfigBooleanControl
+                                            onChange={(value) =>
+                                                setSettings({
+                                                    general: {
+                                                        albumGroupShowFavoriteRating: value,
+                                                    },
+                                                })
+                                            }
+                                            value={albumGroupShowFavoriteRating}
+                                        />
+                                    ),
+                                    id: 'albumGroupShowFavoriteRating',
+                                    label: (
+                                        <Text fw={500} pl="md" size="sm">
+                                            {t('table.config.general.albumGroupShowFavoriteRating')}
+                                        </Text>
+                                    ),
+                                },
+                                {
+                                    component: (
+                                        <ListConfigBooleanControl
+                                            onChange={(value) =>
+                                                setSettings({
+                                                    general: {
+                                                        albumGroupVerticalLayout: value,
+                                                    },
+                                                })
+                                            }
+                                            value={albumGroupVerticalLayout}
+                                        />
+                                    ),
+                                    id: 'albumGroupVerticalLayout',
+                                    label: (
+                                        <Text fw={500} pl="md" size="sm">
+                                            {t('table.config.general.albumGroupVerticalLayout')}
+                                        </Text>
+                                    ),
+                                },
+                            ]
+                          : []),
+                  ]
+                : [];
+
         const allOptions = [
             {
                 component: (
                     <SegmentedControl
                         data={[
                             {
-                                label: t('table.config.general.pagination_infinite', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.pagination_infinite'),
                                 value: ListPaginationType.INFINITE,
                             },
                             {
-                                label: t('table.config.general.pagination_paginate', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.pagination_paginate'),
                                 value: ListPaginationType.PAGINATED,
                             },
                         ]}
@@ -94,7 +236,7 @@ export const TableConfig = ({
                     />
                 ),
                 id: 'pagination',
-                label: t('table.config.general.pagination', { postProcess: 'sentenceCase' }),
+                label: t('table.config.general.pagination'),
                 size: 'sm',
             },
             {
@@ -122,9 +264,7 @@ export const TableConfig = ({
                 id: 'itemsPerPage',
                 label: (
                     <Group>
-                        {t('table.config.general.pagination_itemsPerPage', {
-                            postProcess: 'sentenceCase',
-                        })}
+                        {t('table.config.general.pagination_itemsPerPage')}
                         <Badge>{list.itemsPerPage}</Badge>
                     </Group>
                 ),
@@ -134,104 +274,94 @@ export const TableConfig = ({
                     <SegmentedControl
                         data={[
                             {
-                                label: t('table.config.general.size_compact', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_compact'),
                                 value: 'compact',
                             },
                             {
-                                label: t('table.config.general.size_default', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_default'),
                                 value: 'default',
                             },
                             {
-                                label: t('table.config.general.size_large', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_large'),
                                 value: 'large',
                             },
                         ]}
                         onChange={(value) =>
-                            setList(listKey, {
-                                table: { size: value as 'compact' | 'default' },
+                            setTableUpdate({
+                                size: value as 'compact' | 'default' | 'large',
                             })
                         }
                         size="sm"
-                        value={list.table.size}
+                        value={table?.size ?? 'default'}
                         w="100%"
                     />
                 ),
                 id: 'size',
-                label: t('table.config.general.size', {
-                    postProcess: 'titleCase',
-                }),
+                label: t('table.config.general.size'),
             },
             {
                 component: (
                     <ListConfigBooleanControl
-                        onChange={(e) =>
-                            setList(listKey, { table: { enableRowHoverHighlight: e } })
-                        }
-                        value={list.table.enableRowHoverHighlight}
+                        onChange={(e) => setTableUpdate({ enableHeader: e })}
+                        value={table.enableHeader}
+                    />
+                ),
+                id: 'enableHeader',
+                label: t('table.config.general.showHeader'),
+            },
+            {
+                component: (
+                    <ListConfigBooleanControl
+                        onChange={(e) => setTableUpdate({ enableRowHoverHighlight: e })}
+                        value={table.enableRowHoverHighlight}
                     />
                 ),
                 id: 'enableRowHoverHighlight',
-                label: t('table.config.general.rowHoverHighlight', {
-                    postProcess: 'sentenceCase',
-                }),
+                label: t('table.config.general.rowHoverHighlight'),
             },
             {
                 component: (
                     <ListConfigBooleanControl
-                        onChange={(e) =>
-                            setList(listKey, { table: { enableAlternateRowColors: e } })
-                        }
-                        value={list.table.enableAlternateRowColors}
+                        onChange={(e) => setTableUpdate({ enableAlternateRowColors: e })}
+                        value={table.enableAlternateRowColors}
                     />
                 ),
                 id: 'enableAlternateRowColors',
-                label: t('table.config.general.alternateRowColors', {
-                    postProcess: 'sentenceCase',
-                }),
+                label: t('table.config.general.alternateRowColors'),
             },
             {
                 component: (
                     <ListConfigBooleanControl
-                        onChange={(e) =>
-                            setList(listKey, { table: { enableHorizontalBorders: e } })
-                        }
-                        value={list.table.enableHorizontalBorders}
+                        onChange={(e) => setTableUpdate({ enableHorizontalBorders: e })}
+                        value={table.enableHorizontalBorders}
                     />
                 ),
                 id: 'enableHorizontalBorders',
-                label: t('table.config.general.horizontalBorders', {
-                    postProcess: 'sentenceCase',
-                }),
+                label: t('table.config.general.horizontalBorders'),
             },
             {
                 component: (
                     <ListConfigBooleanControl
-                        onChange={(e) => setList(listKey, { table: { enableVerticalBorders: e } })}
-                        value={list.table.enableVerticalBorders}
+                        onChange={(e) => setTableUpdate({ enableVerticalBorders: e })}
+                        value={table.enableVerticalBorders}
                     />
                 ),
                 id: 'enableVerticalBorders',
-                label: t('table.config.general.verticalBorders', {
-                    postProcess: 'sentenceCase',
-                }),
+                label: t('table.config.general.verticalBorders'),
             },
             {
                 component: (
                     <ListConfigBooleanControl
-                        onChange={(e) => setList(listKey, { table: { autoFitColumns: e } })}
-                        value={list.table.autoFitColumns}
+                        onChange={(e) => setTableUpdate({ autoFitColumns: e })}
+                        value={
+                            tableKey === 'main' ? (table as DataTableProps).autoFitColumns : false
+                        }
                     />
                 ),
                 id: 'autoFitColumns',
-                label: t('table.config.general.autoFitColumns', { postProcess: 'sentenceCase' }),
+                label: t('table.config.general.autoFitColumns'),
             },
-
+            ...albumGroupOptions,
             ...(extraOptions || []),
         ];
 
@@ -245,37 +375,38 @@ export const TableConfig = ({
                 return option;
             })
             .filter((option): option is NonNullable<typeof option> => option !== null);
-    }, [extraOptions, listKey, optionsConfig, setList, t, list]);
+    }, [
+        t,
+        list.pagination,
+        list.itemsPerPage,
+        table,
+        tableKey,
+        extraOptions,
+        setList,
+        listKey,
+        setTableUpdate,
+        optionsConfig,
+        hasAlbumGroupColumn,
+        albumGroupOpen,
+        albumGroupImageSize,
+        albumGroupShowFavoriteRating,
+        albumGroupVerticalLayout,
+        imageResTable,
+        setSettings,
+    ]);
 
     return (
         <>
-            <Accordion
-                styles={{
-                    control: { padding: '0' },
-                    item: { border: 'none' },
-                }}
-            >
-                <Accordion.Item value="table">
-                    <Accordion.Control>
-                        <Text size="sm">
-                            {t('table.config.general.advancedSettings', {
-                                postProcess: 'sentenceCase',
-                            })}
-                        </Text>
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                        <ListConfigTable options={advancedSettings} />
-                    </Accordion.Panel>
-                </Accordion.Item>
-            </Accordion>
+            <ListConfigTable options={advancedSettings} />
+            {hasAlbumGroupColumn && tableKey === 'main' && albumGroupOpen && (
+                <AlbumGroupMetadataConfig />
+            )}
             <Divider />
             <TableColumnConfig
                 data={tableColumnsData}
-                listKey={listKey}
-                onChange={(columns) =>
-                    setList(listKey, { ...list, table: { ...list.table, columns } })
-                }
-                value={list.table.columns}
+                enablePinColumnButtons={enablePinColumnButtons}
+                onChange={(columns) => setTableUpdate({ columns })}
+                value={table.columns}
             />
         </>
     );
@@ -283,16 +414,24 @@ export const TableConfig = ({
 
 const TableColumnConfig = ({
     data,
-    listKey,
+    enablePinColumnButtons,
     onChange,
     value,
 }: {
     data: { label: string; value: string }[];
-    listKey: ItemListKey;
+    enablePinColumnButtons: boolean;
     onChange: (value: ItemTableListColumnConfig[]) => void;
     value: ItemTableListColumnConfig[];
 }) => {
     const { t } = useTranslation();
+
+    const valueRef = useRef(value);
+    const onChangeRef = useRef(onChange);
+
+    useLayoutEffect(() => {
+        valueRef.current = value;
+        onChangeRef.current = onChange;
+    });
 
     const labelMap = useMemo(() => {
         return data.reduce(
@@ -304,133 +443,97 @@ const TableColumnConfig = ({
         );
     }, [data]);
 
-    const handleChangeEnabled = useCallback(
-        (item: ItemTableListColumnConfig, checked: boolean) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], isEnabled: checked };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleChangeEnabled = useCallback((item: ItemTableListColumnConfig, checked: boolean) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], isEnabled: checked };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleMoveUp = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            if (index === 0) return;
-            const newValues = [...value];
-            [newValues[index], newValues[index - 1]] = [newValues[index - 1], newValues[index]];
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleMoveUp = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        if (index === 0) return;
+        const newValues = [...currentValue];
+        [newValues[index], newValues[index - 1]] = [newValues[index - 1], newValues[index]];
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleMoveDown = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            if (index === value.length - 1) return;
-            const newValues = [...value];
-            [newValues[index], newValues[index + 1]] = [newValues[index + 1], newValues[index]];
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleMoveDown = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        if (index === currentValue.length - 1) return;
+        const newValues = [...currentValue];
+        [newValues[index], newValues[index + 1]] = [newValues[index + 1], newValues[index]];
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handlePinToLeft = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
+    const handlePinToLeft = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
 
-            const isPinned = newValues[index].pinned;
-            const isPinnedLeft = isPinned === 'left';
+        const isPinned = newValues[index].pinned;
+        const isPinnedLeft = isPinned === 'left';
 
-            if (isPinnedLeft) {
-                newValues[index] = { ...newValues[index], pinned: null };
-            } else {
-                newValues[index] = { ...newValues[index], pinned: 'left' };
-            }
+        if (isPinnedLeft) {
+            newValues[index] = { ...newValues[index], pinned: null };
+        } else {
+            newValues[index] = { ...newValues[index], pinned: 'left' };
+        }
 
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handlePinToRight = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
+    const handlePinToRight = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
 
-            const isPinned = newValues[index].pinned;
-            const isPinnedRight = isPinned === 'right';
+        const isPinned = newValues[index].pinned;
+        const isPinnedRight = isPinned === 'right';
 
-            if (isPinnedRight) {
-                newValues[index] = { ...newValues[index], pinned: null };
-            } else {
-                newValues[index] = { ...newValues[index], pinned: 'right' };
-            }
+        if (isPinnedRight) {
+            newValues[index] = { ...newValues[index], pinned: null };
+        } else {
+            newValues[index] = { ...newValues[index], pinned: 'right' };
+        }
 
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignLeft = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'start' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignLeft = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'start' };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignCenter = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'center' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignCenter = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'center' };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignRight = useCallback(
-        (item: ItemTableListColumnConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'end' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignRight = useCallback((item: ItemTableListColumnConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'end' };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAutoSize = useCallback(
-        (item: ItemTableListColumnConfig, checked: boolean) => {
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], autoSize: checked };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAutoSize = useCallback((item: ItemTableListColumnConfig, checked: boolean) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], autoSize: checked };
+        onChangeRef.current(newValues);
+    }, []);
 
     const handleRowWidth = useCallback(
         (item: ItemTableListColumnConfig, number: number | string) => {
@@ -446,14 +549,13 @@ const TableColumnConfig = ({
                 number = 2000;
             }
 
-            const value = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
+            const currentValue = valueRef.current;
+            const index = currentValue.findIndex((v) => v.id === item.id);
+            const newValues = [...currentValue];
             newValues[index] = { ...newValues[index], width: number };
-            onChange(newValues);
+            onChangeRef.current(newValues);
         },
-        [listKey, onChange],
+        [],
     );
 
     const [searchColumns, setSearchColumns] = useDebouncedState('', 300);
@@ -484,41 +586,35 @@ const TableColumnConfig = ({
         }));
     }, [value, searchColumns, fuse]);
 
-    const handleReorder = useCallback(
-        (idFrom: string, idTo: string, edge: Edge | null) => {
-            const currentValue = useSettingsStore.getState().lists[listKey]?.table.columns;
-            if (!currentValue) return;
+    const handleReorder = useCallback((idFrom: string, idTo: string, edge: Edge | null) => {
+        const currentValue = valueRef.current;
+        const idList = currentValue.map((item) => item.id);
+        const newIdOrder = dndUtils.reorderById({
+            edge,
+            idFrom,
+            idTo,
+            list: idList,
+        });
 
-            const idList = currentValue.map((item) => item.id);
-            const newIdOrder = dndUtils.reorderById({
-                edge,
-                idFrom,
-                idTo,
-                list: idList,
-            });
-
-            // Map the new ID order back to full items
-            const newOrder = newIdOrder.map((id) => currentValue.find((item) => item.id === id)!);
-            onChange(newOrder);
-        },
-        [listKey, onChange],
-    );
+        // Map the new ID order back to full items
+        const newOrder = newIdOrder.map((id) => currentValue.find((item) => item.id === id)!);
+        onChangeRef.current(newOrder);
+    }, []);
 
     return (
         <Stack gap="xs">
             <Group justify="space-between" mb="md">
-                <Text size="sm">{t('common.tableColumns', { postProcess: 'sentenceCase' })}</Text>
+                <Text size="sm">{t('common.tableColumns')}</Text>
                 <TextInput
                     onChange={(e) => setSearchColumns(e.currentTarget.value)}
-                    placeholder={t('common.search', {
-                        postProcess: 'sentenceCase',
-                    })}
+                    placeholder={t('common.search')}
                     size="xs"
                 />
             </Group>
             <div style={{ userSelect: 'none' }}>
                 {filteredColumns.map(({ item, matches }) => (
                     <TableColumnItem
+                        enablePinColumnButtons={enablePinColumnButtons}
                         handleAlignCenter={handleAlignCenter}
                         handleAlignLeft={handleAlignLeft}
                         handleAlignRight={handleAlignRight}
@@ -562,6 +658,7 @@ const DragHandle = ({
 
 const TableColumnItem = memo(
     ({
+        enablePinColumnButtons,
         handleAlignCenter,
         handleAlignLeft,
         handleAlignRight,
@@ -577,6 +674,7 @@ const TableColumnItem = memo(
         label,
         matches,
     }: {
+        enablePinColumnButtons: boolean;
         handleAlignCenter: (item: ItemTableListColumnConfig) => void;
         handleAlignLeft: (item: ItemTableListColumnConfig) => void;
         handleAlignRight: (item: ItemTableListColumnConfig) => void;
@@ -694,9 +792,7 @@ const TableColumnItem = memo(
                             onClick={() => handleMoveUp(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.moveUp', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.moveUp'),
                             }}
                             variant="subtle"
                         />
@@ -706,39 +802,35 @@ const TableColumnItem = memo(
                             onClick={() => handleMoveDown(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.moveDown', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.moveDown'),
                             }}
                             variant="subtle"
                         />
                     </ActionIconGroup>
-                    <ActionIconGroup className={styles.group}>
-                        <ActionIcon
-                            icon="arrowLeftToLine"
-                            iconProps={{ size: 'md' }}
-                            onClick={() => handlePinToLeft(item)}
-                            size="xs"
-                            tooltip={{
-                                label: t('table.config.general.pinToLeft', {
-                                    postProcess: 'sentenceCase',
-                                }),
-                            }}
-                            variant={item.pinned === 'left' ? 'outline' : 'subtle'}
-                        />
-                        <ActionIcon
-                            icon="arrowRightToLine"
-                            iconProps={{ size: 'md' }}
-                            onClick={() => handlePinToRight(item)}
-                            size="xs"
-                            tooltip={{
-                                label: t('table.config.general.pinToRight', {
-                                    postProcess: 'sentenceCase',
-                                }),
-                            }}
-                            variant={item.pinned === 'right' ? 'outline' : 'subtle'}
-                        />
-                    </ActionIconGroup>
+                    {enablePinColumnButtons && (
+                        <ActionIconGroup className={styles.group}>
+                            <ActionIcon
+                                icon="arrowLeftToLine"
+                                iconProps={{ size: 'md' }}
+                                onClick={() => handlePinToLeft(item)}
+                                size="xs"
+                                tooltip={{
+                                    label: t('table.config.general.pinToLeft'),
+                                }}
+                                variant={item.pinned === 'left' ? 'filled' : 'subtle'}
+                            />
+                            <ActionIcon
+                                icon="arrowRightToLine"
+                                iconProps={{ size: 'md' }}
+                                onClick={() => handlePinToRight(item)}
+                                size="xs"
+                                tooltip={{
+                                    label: t('table.config.general.pinToRight'),
+                                }}
+                                variant={item.pinned === 'right' ? 'filled' : 'subtle'}
+                            />
+                        </ActionIconGroup>
+                    )}
                     <ActionIconGroup className={styles.group}>
                         <ActionIcon
                             icon="alignLeft"
@@ -746,11 +838,9 @@ const TableColumnItem = memo(
                             onClick={() => handleAlignLeft(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignLeft', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignLeft'),
                             }}
-                            variant={item.align === 'start' ? 'outline' : 'subtle'}
+                            variant={item.align === 'start' ? 'filled' : 'subtle'}
                         />
                         <ActionIcon
                             icon="alignCenter"
@@ -758,11 +848,9 @@ const TableColumnItem = memo(
                             onClick={() => handleAlignCenter(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignCenter', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignCenter'),
                             }}
-                            variant={item.align === 'center' ? 'outline' : 'subtle'}
+                            variant={item.align === 'center' ? 'filled' : 'subtle'}
                         />
                         <ActionIcon
                             icon="alignRight"
@@ -770,36 +858,23 @@ const TableColumnItem = memo(
                             onClick={() => handleAlignRight(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignRight', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignRight'),
                             }}
-                            variant={item.align === 'end' ? 'outline' : 'subtle'}
+                            variant={item.align === 'end' ? 'filled' : 'subtle'}
                         />
                     </ActionIconGroup>
                     <NumberInput
                         className={clsx(styles.group, styles.numberInput)}
                         hideControls={false}
                         leftSection={
-                            <>
-                                {item.pinned === null && (
-                                    <Tooltip
-                                        label={t('table.config.general.autosize', {
-                                            postProcess: 'sentenceCase',
-                                        })}
-                                    >
-                                        <Checkbox
-                                            checked={item.autoSize}
-                                            disabled={item.pinned !== null}
-                                            id={item.id}
-                                            onChange={(e) =>
-                                                handleAutoSize(item, e.currentTarget.checked)
-                                            }
-                                            size="xs"
-                                        />
-                                    </Tooltip>
-                                )}
-                            </>
+                            <Tooltip label={t('table.config.general.autosize')}>
+                                <Checkbox
+                                    checked={item.autoSize}
+                                    id={item.id}
+                                    onChange={(e) => handleAutoSize(item, e.currentTarget.checked)}
+                                    size="xs"
+                                />
+                            </Tooltip>
                         }
                         max={2000}
                         min={0}
@@ -818,6 +893,7 @@ const TableColumnItem = memo(
     (prevProps, nextProps) => {
         // Custom comparison function for better memoization
         return (
+            prevProps.enablePinColumnButtons === nextProps.enablePinColumnButtons &&
             prevProps.item.id === nextProps.item.id &&
             prevProps.item.isEnabled === nextProps.item.isEnabled &&
             prevProps.item.autoSize === nextProps.item.autoSize &&

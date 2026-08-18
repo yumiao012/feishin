@@ -11,7 +11,7 @@ import {
 import { disableNativeDragPreview } from '@atlaskit/pragmatic-drag-and-drop/element/disable-native-drag-preview';
 import clsx from 'clsx';
 import Fuse, { FuseResultMatch } from 'fuse.js';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import styles from './table-config.module.css';
@@ -24,7 +24,6 @@ import {
     useSettingsStore,
     useSettingsStoreActions,
 } from '/@/renderer/store';
-import { Accordion } from '/@/shared/components/accordion/accordion';
 import { ActionIcon, ActionIconGroup } from '/@/shared/components/action-icon/action-icon';
 import { Badge } from '/@/shared/components/badge/badge';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
@@ -74,15 +73,11 @@ export const GridConfig = ({
                     <SegmentedControl
                         data={[
                             {
-                                label: t('table.config.general.pagination_infinite', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.pagination_infinite'),
                                 value: ListPaginationType.INFINITE,
                             },
                             {
-                                label: t('table.config.general.pagination_paginate', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.pagination_paginate'),
                                 value: ListPaginationType.PAGINATED,
                             },
                         ]}
@@ -98,7 +93,7 @@ export const GridConfig = ({
                     />
                 ),
                 id: 'pagination',
-                label: t('table.config.general.pagination', { postProcess: 'sentenceCase' }),
+                label: t('table.config.general.pagination'),
                 size: 'sm',
             },
             {
@@ -126,9 +121,7 @@ export const GridConfig = ({
                 id: 'itemsPerPage',
                 label: (
                     <Group>
-                        {t('table.config.general.pagination_itemsPerPage', {
-                            postProcess: 'sentenceCase',
-                        })}
+                        {t('table.config.general.pagination_itemsPerPage')}
                         <Badge>{list.itemsPerPage}</Badge>
                     </Group>
                 ),
@@ -187,7 +180,7 @@ export const GridConfig = ({
                 id: 'itemGap',
                 label: (
                     <Group>
-                        {t('table.config.general.gap', { postProcess: 'sentenceCase' })}
+                        {t('table.config.general.gap')}
                         <Badge>{grid.itemGap}</Badge>
                     </Group>
                 ),
@@ -206,12 +199,12 @@ export const GridConfig = ({
                 label: (
                     <Group justify="space-between" w="100%" wrap="nowrap">
                         <Group>
-                            {t('table.config.general.itemsPerRow', { postProcess: 'sentenceCase' })}
+                            {t('table.config.general.itemsPerRow')}
                             <Badge>{grid.itemsPerRow}</Badge>
                         </Group>
                         <Checkbox
                             checked={grid.itemsPerRowEnabled}
-                            label={t('common.enable', { postProcess: 'titleCase' })}
+                            label={t('common.enable')}
                             onChange={(e) =>
                                 setList(listKey, {
                                     grid: { itemsPerRowEnabled: e.target.checked },
@@ -228,21 +221,15 @@ export const GridConfig = ({
                     <SegmentedControl
                         data={[
                             {
-                                label: t('table.config.general.size_compact', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_compact'),
                                 value: 'compact',
                             },
                             {
-                                label: t('table.config.general.size_default', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_default'),
                                 value: 'default',
                             },
                             {
-                                label: t('table.config.general.size_large', {
-                                    postProcess: 'titleCase',
-                                }),
+                                label: t('table.config.general.size_large'),
                                 value: 'large',
                             },
                         ]}
@@ -257,7 +244,7 @@ export const GridConfig = ({
                     />
                 ),
                 id: 'size',
-                label: t('table.config.general.size', { postProcess: 'sentenceCase' }),
+                label: t('table.config.general.size'),
                 size: 'sm',
             },
 
@@ -284,30 +271,11 @@ export const GridConfig = ({
 
     return (
         <>
-            <Accordion
-                styles={{
-                    control: { padding: '0' },
-                    item: { border: 'none' },
-                }}
-            >
-                <Accordion.Item value="grid">
-                    <Accordion.Control>
-                        <Text size="sm">
-                            {t('table.config.general.advancedSettings', {
-                                postProcess: 'sentenceCase',
-                            })}
-                        </Text>
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                        <ListConfigTable options={options} />
-                    </Accordion.Panel>
-                </Accordion.Item>
-            </Accordion>
+            <ListConfigTable options={options} />
             <Divider />
             <GridRowConfig
                 data={gridRowsData}
-                listKey={listKey}
-                onChange={(rows) => setList(listKey, { ...list, grid: { ...grid, rows } })}
+                onChange={(rows) => setList(listKey, { grid: { rows } })}
                 value={grid.rows}
             />
         </>
@@ -316,16 +284,22 @@ export const GridConfig = ({
 
 const GridRowConfig = ({
     data,
-    listKey,
     onChange,
     value,
 }: {
     data: { label: string; value: string }[];
-    listKey: ItemListKey;
     onChange: (value: ItemGridListRowConfig[]) => void;
     value: ItemGridListRowConfig[];
 }) => {
     const { t } = useTranslation();
+
+    const valueRef = useRef(value);
+    const onChangeRef = useRef(onChange);
+
+    useLayoutEffect(() => {
+        valueRef.current = value;
+        onChangeRef.current = onChange;
+    });
 
     const labelMap = useMemo(() => {
         return data.reduce(
@@ -337,79 +311,55 @@ const GridRowConfig = ({
         );
     }, [data]);
 
-    const handleChangeEnabled = useCallback(
-        (item: ItemGridListRowConfig, checked: boolean) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], isEnabled: checked };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleChangeEnabled = useCallback((item: ItemGridListRowConfig, checked: boolean) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], isEnabled: checked };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleMoveUp = useCallback(
-        (item: ItemGridListRowConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            if (index === 0) return;
-            const newValues = [...value];
-            [newValues[index], newValues[index - 1]] = [newValues[index - 1], newValues[index]];
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleMoveUp = useCallback((item: ItemGridListRowConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        if (index === 0) return;
+        const newValues = [...currentValue];
+        [newValues[index], newValues[index - 1]] = [newValues[index - 1], newValues[index]];
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleMoveDown = useCallback(
-        (item: ItemGridListRowConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            if (index === value.length - 1) return;
-            const newValues = [...value];
-            [newValues[index], newValues[index + 1]] = [newValues[index + 1], newValues[index]];
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleMoveDown = useCallback((item: ItemGridListRowConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        if (index === currentValue.length - 1) return;
+        const newValues = [...currentValue];
+        [newValues[index], newValues[index + 1]] = [newValues[index + 1], newValues[index]];
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignLeft = useCallback(
-        (item: ItemGridListRowConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'start' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignLeft = useCallback((item: ItemGridListRowConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'start' };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignCenter = useCallback(
-        (item: ItemGridListRowConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'center' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignCenter = useCallback((item: ItemGridListRowConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'center' };
+        onChangeRef.current(newValues);
+    }, []);
 
-    const handleAlignRight = useCallback(
-        (item: ItemGridListRowConfig) => {
-            const value = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!value) return;
-            const index = value.findIndex((v) => v.id === item.id);
-            const newValues = [...value];
-            newValues[index] = { ...newValues[index], align: 'end' };
-            onChange(newValues);
-        },
-        [listKey, onChange],
-    );
+    const handleAlignRight = useCallback((item: ItemGridListRowConfig) => {
+        const currentValue = valueRef.current;
+        const index = currentValue.findIndex((v) => v.id === item.id);
+        const newValues = [...currentValue];
+        newValues[index] = { ...newValues[index], align: 'end' };
+        onChangeRef.current(newValues);
+    }, []);
 
     const [searchRows, setSearchRows] = useDebouncedState('', 300);
 
@@ -439,35 +389,28 @@ const GridRowConfig = ({
         }));
     }, [value, searchRows, fuse]);
 
-    const handleReorder = useCallback(
-        (idFrom: string, idTo: string, edge: Edge | null) => {
-            const currentValue = useSettingsStore.getState().lists[listKey]?.grid.rows;
-            if (!currentValue) return;
+    const handleReorder = useCallback((idFrom: string, idTo: string, edge: Edge | null) => {
+        const currentValue = valueRef.current;
+        const idList = currentValue.map((item) => item.id);
+        const newIdOrder = dndUtils.reorderById({
+            edge,
+            idFrom,
+            idTo,
+            list: idList,
+        });
 
-            const idList = currentValue.map((item) => item.id);
-            const newIdOrder = dndUtils.reorderById({
-                edge,
-                idFrom,
-                idTo,
-                list: idList,
-            });
-
-            // Map the new ID order back to full items
-            const newOrder = newIdOrder.map((id) => currentValue.find((item) => item.id === id)!);
-            onChange(newOrder);
-        },
-        [listKey, onChange],
-    );
+        // Map the new ID order back to full items
+        const newOrder = newIdOrder.map((id) => currentValue.find((item) => item.id === id)!);
+        onChangeRef.current(newOrder);
+    }, []);
 
     return (
         <Stack gap="xs">
             <Group justify="space-between" mb="md">
-                <Text size="sm">{t('common.gridRows', { postProcess: 'sentenceCase' })}</Text>
+                <Text size="sm">{t('common.gridRows')}</Text>
                 <TextInput
                     onChange={(e) => setSearchRows(e.currentTarget.value)}
-                    placeholder={t('common.search', {
-                        postProcess: 'sentenceCase',
-                    })}
+                    placeholder={t('common.search')}
                     size="xs"
                 />
             </Group>
@@ -635,9 +578,7 @@ const GridRowItem = memo(
                             onClick={() => handleMoveUp(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.moveUp', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.moveUp'),
                             }}
                             variant="subtle"
                         />
@@ -647,9 +588,7 @@ const GridRowItem = memo(
                             onClick={() => handleMoveDown(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.moveDown', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.moveDown'),
                             }}
                             variant="subtle"
                         />
@@ -661,9 +600,7 @@ const GridRowItem = memo(
                             onClick={() => handleAlignLeft(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignLeft', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignLeft'),
                             }}
                             variant={item.align === 'start' ? 'filled' : 'subtle'}
                         />
@@ -673,9 +610,7 @@ const GridRowItem = memo(
                             onClick={() => handleAlignCenter(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignCenter', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignCenter'),
                             }}
                             variant={item.align === 'center' ? 'filled' : 'subtle'}
                         />
@@ -685,9 +620,7 @@ const GridRowItem = memo(
                             onClick={() => handleAlignRight(item)}
                             size="xs"
                             tooltip={{
-                                label: t('table.config.general.alignRight', {
-                                    postProcess: 'sentenceCase',
-                                }),
+                                label: t('table.config.general.alignRight'),
                             }}
                             variant={item.align === 'end' ? 'filled' : 'subtle'}
                         />

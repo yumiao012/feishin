@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import { useMemo } from 'react';
 import { Link } from 'react-router';
 
 import styles from './title-column.module.css';
@@ -10,10 +11,12 @@ import {
     ItemTableListInnerColumn,
     TableColumnContainer,
 } from '/@/renderer/components/item-list/item-table-list/item-table-list-column';
+import { useIsActiveRow } from '/@/renderer/components/item-list/item-table-list/item-table-list-context';
+import { ExplicitIndicator } from '/@/shared/components/explicit-indicator/explicit-indicator';
 import { Text } from '/@/shared/components/text/text';
 import { LibraryItem, QueueSong } from '/@/shared/types/domain-types';
 
-export const TitleColumn = (props: ItemTableListInnerColumn) => {
+const TitleColumnBase = (props: ItemTableListInnerColumn) => {
     const { itemType } = props;
 
     switch (itemType) {
@@ -27,14 +30,19 @@ export const TitleColumn = (props: ItemTableListInnerColumn) => {
     }
 };
 
+export const TitleColumn = TitleColumnBase;
+
 function DefaultTitleColumn(props: ItemTableListInnerColumn) {
-    const row: string | undefined = (props.data as (any | undefined)[])[props.rowIndex]?.[
-        props.columns[props.columnIndex].id
-    ];
+    const rowItem = props.getRowItem?.(props.rowIndex) ?? (props.data as any[])[props.rowIndex];
+    const row: string | undefined = rowItem?.[props.columns[props.columnIndex].id];
+
+    const path = useMemo(() => {
+        if (typeof row !== 'string' || !rowItem || !(rowItem as any).id) return undefined;
+        return getTitlePath(props.itemType, (rowItem as any).id as string);
+    }, [props.itemType, row, rowItem]);
 
     if (typeof row === 'string') {
-        const path = getTitlePath(props.itemType, (props.data[props.rowIndex] as any).id as string);
-        const item = props.data[props.rowIndex] as any;
+        const item = rowItem as any;
 
         const titleLinkProps = path
             ? {
@@ -56,6 +64,7 @@ function DefaultTitleColumn(props: ItemTableListInnerColumn) {
                     isNoSelect
                     {...titleLinkProps}
                 >
+                    <ExplicitIndicator explicitStatus={item?.explicitStatus} />
                     {row}
                 </Text>
             </TableColumnContainer>
@@ -70,20 +79,19 @@ function DefaultTitleColumn(props: ItemTableListInnerColumn) {
 }
 
 function QueueSongTitleColumn(props: ItemTableListInnerColumn) {
-    const row: string | undefined = (props.data as (any | undefined)[])[props.rowIndex]?.[
-        props.columns[props.columnIndex].id
-    ];
+    const rowItem = props.getRowItem?.(props.rowIndex) ?? (props.data as any[])[props.rowIndex];
+    const row: string | undefined = rowItem?.[props.columns[props.columnIndex].id];
 
-    const song = props.data[props.rowIndex] as QueueSong;
-    const isActive =
-        !!props.activeRowId &&
-        (props.activeRowId === song?.id || props.activeRowId === song?._uniqueId);
+    const song = rowItem as QueueSong;
+    const isActive = useIsActiveRow(song?.id, song?._uniqueId);
+
+    const path = useMemo(() => {
+        if (typeof row !== 'string' || !rowItem || !(rowItem as any).id) return undefined;
+        return getTitlePath(props.itemType, (rowItem as any).id as string);
+    }, [props.itemType, row, rowItem]);
 
     if (typeof row === 'string') {
-        const path = getTitlePath(props.itemType, (props.data[props.rowIndex] as any).id as string);
-        const item = props.data[props.rowIndex] as any;
-
-        const textStyles = isActive ? { color: 'var(--theme-colors-primary)' } : {};
+        const item = rowItem as any;
 
         const titleLinkProps = path
             ? {
@@ -98,15 +106,30 @@ function QueueSongTitleColumn(props: ItemTableListInnerColumn) {
             <TableColumnContainer {...props}>
                 <Text
                     className={clsx({
+                        [styles.active]: isActive,
                         [styles.compact]: props.size === 'compact',
                         [styles.large]: props.size === 'large',
                         [styles.nameContainer]: true,
                     })}
                     isNoSelect
                     {...titleLinkProps}
-                    style={textStyles}
                 >
+                    <ExplicitIndicator explicitStatus={song?.explicitStatus} />
                     {row}
+                    {song?.trackSubtitle && props.itemType !== LibraryItem.QUEUE_SONG && (
+                        <Text
+                            className={clsx({
+                                [styles.active]: isActive,
+                            })}
+                            component="span"
+                            isMuted
+                            size="sm"
+                        >
+                            {' ('}
+                            {song.trackSubtitle}
+                            {')'}
+                        </Text>
+                    )}
                 </Text>
             </TableColumnContainer>
         );

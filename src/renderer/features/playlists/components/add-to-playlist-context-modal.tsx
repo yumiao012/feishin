@@ -155,7 +155,7 @@ export const AddToPlaylistContextModal = ({
 
         setIsLoading(true);
         const allSongIds: string[] = [];
-        let totalUniquesAdded = 0;
+        let totalTracksAdded = 0;
 
         try {
             if (albumId && albumId.length > 0) {
@@ -204,6 +204,18 @@ export const AddToPlaylistContextModal = ({
 
             const playlistIds = [...values.selectedPlaylistIds];
 
+            if (allSongIds.length === 0) {
+                setIsLoading(false);
+                toast.info({
+                    message: t('form.addToPlaylist.noneAdded', {
+                        playlist: t('entity.playlistWithCount', {
+                            count: playlistIds.length + values.newPlaylists.length,
+                        }),
+                    }),
+                });
+                return;
+            }
+
             if (values.newPlaylists) {
                 for (const playlist of values.newPlaylists) {
                     try {
@@ -216,26 +228,26 @@ export const AddToPlaylistContextModal = ({
                         });
 
                         if (response?.id) {
-                            playlistIds.push(response?.id);
+                            playlistIds.push(response.id);
                         }
                     } catch (error: any) {
                         toast.error({
                             message: `[${playlist}] ${error?.message}`,
-                            title: t('error.genericError', { postProcess: 'sentenceCase' }),
+                            title: t('error.genericError'),
                         });
                     }
                 }
             }
 
             for (const playlistId of playlistIds) {
-                const uniqueSongIds: string[] = [];
+                let songsToAdd = allSongIds;
 
                 if (values.skipDuplicates) {
-                    const queryKey = queryKeys.playlists.songList(serverId, playlistId);
+                    const queryKey = queryKeys.playlists.songListIds(serverId, playlistId);
 
                     const playlistSongsRes = await queryClient.fetchQuery({
                         queryFn: ({ signal }) => {
-                            return api.controller.getPlaylistSongList({
+                            return api.controller.getPlaylistSongIds({
                                 apiClientProps: {
                                     serverId,
                                     signal,
@@ -248,59 +260,69 @@ export const AddToPlaylistContextModal = ({
                         queryKey,
                     });
 
-                    const playlistSongIds = playlistSongsRes?.items?.map((song) => song.id);
+                    const playlistSongIds = playlistSongsRes?.items;
+                    const uniqueSongIds: string[] = [];
 
                     for (const songId of allSongIds) {
                         if (!playlistSongIds?.includes(songId)) {
                             uniqueSongIds.push(songId);
                         }
                     }
-                    totalUniquesAdded += uniqueSongIds.length;
+
+                    songsToAdd = uniqueSongIds;
                 }
 
-                if (values.skipDuplicates ? uniqueSongIds.length > 0 : allSongIds.length > 0) {
-                    addToPlaylistMutation.mutate(
-                        {
-                            apiClientProps: { serverId },
-                            body: { songId: values.skipDuplicates ? uniqueSongIds : allSongIds },
-                            query: { id: playlistId },
-                        },
-                        {
-                            onError: (err) => {
-                                toast.error({
-                                    message: `[${
-                                        playlistSelect.find(
-                                            (playlist) => playlist.value === playlistId,
-                                        )?.label
-                                    }] ${err.message}`,
-                                    title: t('error.genericError', { postProcess: 'sentenceCase' }),
-                                });
-                            },
-                        },
-                    );
+                if (songsToAdd.length === 0) {
+                    continue;
                 }
+
+                totalTracksAdded += songsToAdd.length;
+
+                addToPlaylistMutation.mutate(
+                    {
+                        apiClientProps: { serverId },
+                        body: { songId: songsToAdd },
+                        query: { id: playlistId },
+                    },
+                    {
+                        onError: (err) => {
+                            toast.error({
+                                message: `[${
+                                    playlistSelect.find((playlist) => playlist.value === playlistId)
+                                        ?.label
+                                }] ${err.message}`,
+                                title: t('error.genericError'),
+                            });
+                        },
+                    },
+                );
             }
 
-            const addMessage =
-                values.skipDuplicates &&
-                allSongIds.length * playlistIds.length !== totalUniquesAdded
-                    ? Math.floor(totalUniquesAdded / playlistIds.length)
-                    : allSongIds.length;
-
             setIsLoading(false);
+
+            if (totalTracksAdded === 0) {
+                toast.info({
+                    message: t('form.addToPlaylist.noneAdded', {
+                        playlist: t('entity.playlistWithCount', {
+                            count: playlistIds.length,
+                        }),
+                    }),
+                });
+                return;
+            }
+
             toast.success({
                 message: t('form.addToPlaylist.success', {
-                    message: addMessage,
+                    message: totalTracksAdded,
                     numOfPlaylists: playlistIds.length,
-                    postProcess: 'sentenceCase',
                 }),
             });
             closeModal(id);
         } catch (error: any) {
             setIsLoading(false);
             toast.error({
-                message: error?.message || t('error.genericError', { postProcess: 'sentenceCase' }),
-                title: t('error.genericError', { postProcess: 'sentenceCase' }),
+                message: error?.message || t('error.genericError'),
+                title: t('error.genericError'),
             });
         }
     });
@@ -422,9 +444,7 @@ export const AddToPlaylistContextModal = ({
                     <TextInput
                         data-autofocus
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder={t('form.addToPlaylist.searchOrCreate', {
-                            postProcess: 'sentenceCase',
-                        })}
+                        placeholder={t('form.addToPlaylist.searchOrCreate')}
                         value={search}
                     />
                     <ScrollArea style={{ maxHeight: '18rem' }}>
@@ -482,7 +502,6 @@ export const AddToPlaylistContextModal = ({
                         >
                             {t('form.addToPlaylist.create', {
                                 playlist: search,
-                                postProcess: 'sentenceCase',
                             })}
                         </Button>
                     )}
@@ -512,7 +531,6 @@ export const AddToPlaylistContextModal = ({
                     <Switch
                         label={t('form.addToPlaylist.input', {
                             context: 'skipDuplicates',
-                            postProcess: 'titleCase',
                         })}
                         {...form.getInputProps('skipDuplicates', { type: 'checkbox' })}
                     />
@@ -523,7 +541,7 @@ export const AddToPlaylistContextModal = ({
                             uppercase
                             variant="subtle"
                         >
-                            {t('common.cancel', { postProcess: 'titleCase' })}
+                            {t('common.cancel')}
                         </ModalButton>
                         <ModalButton
                             disabled={
@@ -537,7 +555,7 @@ export const AddToPlaylistContextModal = ({
                             uppercase
                             variant="filled"
                         >
-                            {t('common.add', { postProcess: 'titleCase' })}
+                            {t('common.add')}
                         </ModalButton>
                     </Group>
                 </Stack>
@@ -552,15 +570,16 @@ const PlaylistTableItem = memo(
 
         return (
             <Box className={styles.container} w="100%">
-                <Grid align="center" gutter="xs" w="100%">
+                <Grid align="center" gap="xs" w="100%">
                     <Grid.Col span="content">
                         <Flex align="center" justify="center" px="sm">
                             <ItemImage
-                                id={item.id}
+                                id={item.imageId}
                                 imageContainerProps={{
                                     className: styles.imageContainer,
                                 }}
                                 itemType={LibraryItem.PLAYLIST}
+                                type="table"
                             />
                         </Flex>
                     </Grid.Col>
@@ -586,13 +605,7 @@ const PlaylistTableItem = memo(
                                 </Group>
 
                                 <Text className={styles.statusText} isMuted size="sm">
-                                    {item.public
-                                        ? t('common.public', {
-                                              postProcess: 'titleCase',
-                                          })
-                                        : t('common.private', {
-                                              postProcess: 'titleCase',
-                                          })}
+                                    {item.public ? t('common.public') : t('common.private')}
                                 </Text>
                             </Group>
                         </Stack>

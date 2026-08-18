@@ -31,9 +31,9 @@ export const MobileFullscreenPlayerControls = memo(
             <div className={styles.controlsContainer}>
                 <PlayerButton
                     icon={<Icon fill="default" icon="mediaPrevious" size="xl" />}
-                    onClick={mediaPrevious}
+                    onClick={(e) => mediaPrevious(e.altKey)}
                     tooltip={{
-                        label: t('player.previous', { postProcess: 'sentenceCase' }),
+                        label: t('player.previous'),
                         openDelay: 0,
                     }}
                     variant="secondary"
@@ -44,7 +44,6 @@ export const MobileFullscreenPlayerControls = memo(
                     tooltip={{
                         label: t('player.skip', {
                             context: 'back',
-                            postProcess: 'sentenceCase',
                         }),
                         openDelay: 0,
                     }}
@@ -52,7 +51,7 @@ export const MobileFullscreenPlayerControls = memo(
                 />
                 <MainPlayButton
                     disabled={currentSongId === undefined}
-                    isPaused={status === PlayerStatus.PAUSED}
+                    isPaused={status !== PlayerStatus.PLAYING}
                     onClick={mediaTogglePlayPause}
                     style={{
                         height: '50px',
@@ -65,7 +64,6 @@ export const MobileFullscreenPlayerControls = memo(
                     tooltip={{
                         label: t('player.skip', {
                             context: 'forward',
-                            postProcess: 'sentenceCase',
                         }),
                         openDelay: 0,
                     }}
@@ -73,9 +71,9 @@ export const MobileFullscreenPlayerControls = memo(
                 />
                 <PlayerButton
                     icon={<Icon fill="default" icon="mediaNext" size="xl" />}
-                    onClick={mediaNext}
+                    onClick={(e) => mediaNext(e.altKey)}
                     tooltip={{
-                        label: t('player.next', { postProcess: 'sentenceCase' }),
+                        label: t('player.next'),
                         openDelay: 0,
                     }}
                     variant="secondary"

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { jfType } from '/@/shared/api/jellyfin/jellyfin-types';
+import { coerceYear, parsePartialIsoDateFromApi } from '/@/shared/api/partial-iso-date';
 import {
     Album,
     AlbumArtist,
@@ -9,7 +10,6 @@ import {
     LibraryItem,
     MusicFolder,
     Playlist,
-    RelatedArtist,
     Song,
 } from '/@/shared/types/domain-types';
 import { ServerListItem, ServerType } from '/@/shared/types/types';
@@ -17,40 +17,6 @@ import { ServerListItem, ServerType } from '/@/shared/types/types';
 const TICKS_PER_MS = 10000;
 
 type AlbumOrSong = z.infer<typeof jfType._response.album> | z.infer<typeof jfType._response.song>;
-
-const KEYS_TO_OMIT = new Set(['AlbumArtist', 'Artist']);
-
-const getPeople = (item: AlbumOrSong): null | Record<string, RelatedArtist[]> => {
-    if (item.People) {
-        const participants: Record<string, RelatedArtist[]> = {};
-
-        for (const person of item.People) {
-            const key = person.Type || '';
-            if (KEYS_TO_OMIT.has(key)) {
-                continue;
-            }
-
-            const item: RelatedArtist = {
-                // for other roles, we just want to display this and not filter.
-                // filtering (and links) would require a separate field, PersonIds
-                id: '',
-                imageId: null,
-                imageUrl: null,
-                name: person.Name,
-            };
-
-            if (key in participants) {
-                participants[key].push(item);
-            } else {
-                participants[key] = [item];
-            }
-        }
-
-        return participants;
-    }
-
-    return null;
-};
 
 const getTags = (item: AlbumOrSong): null | Record<string, string[]> => {
     if (item.Tags) {
@@ -103,10 +69,24 @@ const getPlaylistImageId = (item: z.infer<typeof jfType._response.playlist>): nu
     return null;
 };
 
+const jellyfinPremiereFields = (item: {
+    PremiereDate?: string;
+    ProductionYear?: number;
+}): { originalYear: number; releaseDate: null | string; releaseYear: null | number } => {
+    const premiere = parsePartialIsoDateFromApi(item.PremiereDate ?? null);
+    const prodYear = coerceYear(item.ProductionYear);
+    const releaseYear: null | number =
+        premiere.year > 0 ? premiere.year : prodYear > 0 ? prodYear : null;
+    const releaseDate = premiere.date ?? (prodYear > 0 ? String(prodYear) : null);
+    const originalYear = premiere.year > 0 ? premiere.year : prodYear;
+    return { originalYear, releaseDate, releaseYear };
+};
+
 const normalizeSong = (
     item: z.infer<typeof jfType._response.song>,
     server: null | ServerListItem,
 ): Song => {
+    let bitDepth: null | number = null;
     let bitRate = 0;
     let channels: null | number = null;
     let container: null | string = null;
@@ -124,6 +104,7 @@ const normalizeSong = (
         if ((source.MediaStreams?.length || 0) > 0) {
             for (const stream of source.MediaStreams) {
                 if (stream.Type === 'Audio') {
+                    bitDepth = stream.BitDepth || null;
                     bitRate =
                         stream.BitRate !== undefined
                             ? Number(Math.trunc(stream.BitRate / 1000))
@@ -138,28 +119,35 @@ const normalizeSong = (
         console.warn('Jellyfin song retrieved with no media sources', item);
     }
 
+    const { releaseDate, releaseYear } = jellyfinPremiereFields(item);
+
     return {
         _itemType: LibraryItem.SONG,
         _serverId: server?.id || '',
         _serverType: ServerType.JELLYFIN,
         album: item.Album,
+        albumArtistName: item.AlbumArtist || '',
         albumArtists: item.AlbumArtists?.map((entry) => ({
             id: entry.Id,
             imageId: entry.Id,
             imageUrl: null,
             name: entry.Name,
+            userFavorite: false,
+            userRating: null,
         })),
         albumId: item.AlbumId || `dummy/${item.Id}`,
-        artistName: item?.ArtistItems?.[0]?.Name || item?.AlbumArtists?.[0]?.Name,
+        artistName: item?.ArtistItems?.map((entry) => entry.Name).join(', ') || '',
         artists: (item?.ArtistItems?.length ? item.ArtistItems : item.AlbumArtists)?.map(
             (entry) => ({
                 id: entry.Id,
-                imageId: entry.Id,
+                imageId: null,
                 imageUrl: null,
                 name: entry.Name,
+                userFavorite: false,
+                userRating: null,
             }),
         ),
-        bitDepth: null,
+        bitDepth,
         bitRate,
         bpm: null,
         channels,
@@ -167,31 +155,37 @@ const normalizeSong = (
         compilation: null,
         container,
         createdAt: item.DateCreated,
+        date: releaseDate || String(releaseYear),
         discNumber: (item.ParentIndexNumber && item.ParentIndexNumber) || 1,
         discSubtitle: null,
         duration: item.RunTimeTicks / TICKS_PER_MS,
         explicitStatus: null,
         gain:
-            item.NormalizationGain !== undefined
+            item.AlbumNormalizationGain !== undefined ||
+            item.NormalizationGain !== undefined ||
+            item.LUFS !== undefined
                 ? {
-                      track: item.NormalizationGain,
+                      album: item.AlbumNormalizationGain,
+                      track:
+                          item.NormalizationGain !== undefined
+                              ? item.NormalizationGain
+                              : item.LUFS !== undefined
+                                ? -18 - item.LUFS
+                                : undefined,
                   }
-                : item.LUFS
-                  ? {
-                        track: -18 - item.LUFS,
-                    }
-                  : null,
-        genres: item.GenreItems?.map((entry) => ({
-            _itemType: LibraryItem.GENRE,
-            _serverId: server?.id || '',
-            _serverType: ServerType.JELLYFIN,
-            albumCount: null,
-            id: entry.Id,
-            imageId: null,
-            imageUrl: null,
-            name: entry.Name,
-            songCount: null,
-        })),
+                : null,
+        genres:
+            item.GenreItems?.map((entry) => ({
+                _itemType: LibraryItem.GENRE,
+                _serverId: server?.id || '',
+                _serverType: ServerType.JELLYFIN,
+                albumCount: null,
+                id: entry.Id,
+                imageId: null,
+                imageUrl: null,
+                name: entry.Name,
+                songCount: null,
+            })) || null,
         id: item.Id,
         imageId: getSongImageId(item),
         imageUrl: null,
@@ -200,20 +194,23 @@ const normalizeSong = (
         mbzRecordingId: null,
         mbzTrackId: item.ProviderIds?.MusicBrainzTrack || null,
         name: item.Name,
-        participants: getPeople(item),
-        path,
+        participants: null,
+        path: path || '',
         peak: null,
         playCount: (item.UserData && item.UserData.PlayCount) || 0,
         playlistItemId: item.PlaylistItemId,
-        releaseDate: item.PremiereDate ? item.PremiereDate : null,
-        releaseYear: item.ProductionYear || null,
+        releaseDate,
+        releaseYear,
         sampleRate,
         size,
+        sortName: item.SortName || item.Name,
         tags: getTags(item),
         trackNumber: item.IndexNumber,
+        trackSubtitle: null,
         updatedAt: item.DateCreated,
         userFavorite: (item.UserData && item.UserData.IsFavorite) || false,
         userRating: null,
+        year: releaseYear,
     };
 };
 
@@ -221,17 +218,21 @@ const normalizeAlbum = (
     item: z.infer<typeof jfType._response.album>,
     server: null | ServerListItem,
 ): Album => {
+    const { originalYear, releaseDate, releaseYear } = jellyfinPremiereFields(item);
+
     return {
         _itemType: LibraryItem.ALBUM,
         _serverId: server?.id || '',
         _serverType: ServerType.JELLYFIN,
-        albumArtist: item.AlbumArtist,
+        albumArtistName: item.AlbumArtist,
         albumArtists:
             item.AlbumArtists.map((entry) => ({
                 id: entry.Id,
                 imageId: entry.Id,
                 imageUrl: null,
                 name: entry.Name,
+                userFavorite: false,
+                userRating: null,
             })) || [],
         artists: (item.ArtistItems?.length ? item.ArtistItems : item.AlbumArtists)?.map(
             (entry) => ({
@@ -239,6 +240,8 @@ const normalizeAlbum = (
                 imageId: entry.Id,
                 imageUrl: null,
                 name: entry.Name,
+                userFavorite: false,
+                userRating: null,
             }),
         ),
         comment: null,
@@ -263,18 +266,23 @@ const normalizeAlbum = (
         isCompilation: null,
         lastPlayedAt: null,
         mbzId: item.ProviderIds?.MusicBrainzAlbum || null,
+        mbzReleaseGroupId: item.ProviderIds?.MusicBrainzReleaseGroup || null,
         name: item.Name,
-        originalDate: null,
-        participants: getPeople(item),
+        originalDate: releaseDate,
+        originalYear,
+        participants: null,
         playCount: item.UserData?.PlayCount || 0,
         recordLabels: item.Studios?.map((entry) => entry.Name) || [],
-        releaseDate: item.PremiereDate || null,
+        releaseDate,
+        releaseType: null,
         releaseTypes: [],
-        releaseYear: item.ProductionYear || null,
+        releaseYear,
         size: null,
         songCount: item?.ChildCount || null,
         songs: item.Songs?.map((song) => normalizeSong(song, server)),
+        sortName: item.SortName || item.Name,
         tags: getTags(item),
+        trackYearRange: null,
         updatedAt: item?.DateLastMediaAdded || item.DateCreated,
         userFavorite: item.UserData?.IsFavorite || false,
         userRating: null,
@@ -292,9 +300,11 @@ const normalizeAlbumArtist = (
         item.similarArtists?.Items?.filter((entry) => entry.Name !== 'Various Artists').map(
             (entry) => ({
                 id: entry.Id,
-                imageId: entry.Id,
+                imageId: getAlbumArtistImageId(entry),
                 imageUrl: null,
                 name: entry.Name,
+                userFavorite: entry.UserData?.IsFavorite || false,
+                userRating: null,
             }),
         ) || [];
 
@@ -325,6 +335,7 @@ const normalizeAlbumArtist = (
         playCount: item.UserData?.PlayCount || 0,
         similarArtists,
         songCount: item.SongCount ?? null,
+        uploadedImage: item.ImageTags?.Primary ?? undefined,
         userFavorite: item.UserData?.IsFavorite || false,
         userRating: null,
     };
@@ -362,6 +373,7 @@ const normalizePlaylist = (
         size: null,
         songCount: item?.ChildCount || null,
         sync: null,
+        uploadedImage: item.ImageTags?.Primary ?? undefined,
     };
 };
 
@@ -392,6 +404,14 @@ const normalizeMusicFolder = (item: z.infer<typeof jfType._response.musicFolder>
 //   };
 // };
 
+const getGenreImageId = (item: z.infer<typeof jfType._response.genre>): null | string => {
+    if (item.ImageTags?.Primary) {
+        return item.Id;
+    }
+
+    return null;
+};
+
 const normalizeGenre = (
     item: z.infer<typeof jfType._response.genre>,
     server: null | ServerListItem,
@@ -402,7 +422,7 @@ const normalizeGenre = (
         _serverType: ServerType.JELLYFIN,
         albumCount: null,
         id: item.Id,
-        imageId: item.Id,
+        imageId: getGenreImageId(item),
         imageUrl: null,
         name: item.Name,
         songCount: null,

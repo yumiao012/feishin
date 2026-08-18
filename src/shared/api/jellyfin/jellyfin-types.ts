@@ -107,7 +107,7 @@ const baseParameters = z.object({
     ExcludeArtistIds: z.string().optional(),
     ExcludeItemIds: z.string().optional(),
     ExcludeItemTypes: z.string().optional(),
-    Fields: z.string().optional(),
+    Fields: z.array(z.string()).readonly().optional(),
     FolderId: z.string().optional(),
     ImageTypeLimit: z.number().optional(),
     IncludeArtists: z.boolean().optional(),
@@ -457,7 +457,10 @@ const participant = z.object({
 
 const providerIds = z.object({
     MusicBrainzAlbum: z.string().optional(),
+    MusicBrainzAlbumArtist: z.string().optional(),
     MusicBrainzArtist: z.string().optional(),
+    MusicBrainzRecording: z.string().optional(),
+    MusicBrainzReleaseGroup: z.string().optional(),
     MusicBrainzTrack: z.string().optional(),
 });
 
@@ -468,6 +471,7 @@ const song = z.object({
     AlbumArtist: z.string(),
     AlbumArtists: z.array(genericItem),
     AlbumId: z.string().optional(),
+    AlbumNormalizationGain: z.number().optional(),
     AlbumPrimaryImageTag: z.string(),
     ArtistItems: z.array(genericItem),
     Artists: z.array(z.string()),
@@ -560,6 +564,7 @@ const album = z.object({
     RunTimeTicks: z.number(),
     ServerId: z.string(),
     Songs: z.array(song).optional(), // This is not a native Jellyfin property -- this is used for combined album detail
+    SortName: z.string().optional(),
     Studios: z.array(studio),
     Tags: z.string().array().optional(),
     Type: z.string(),
@@ -679,14 +684,9 @@ const createPlaylist = z.object({
 const updatePlaylist = z.null();
 
 const updatePlaylistParameters = z.object({
-    Genres: z.array(genreItem),
+    Ids: z.string().array().optional(),
     IsPublic: z.boolean().optional(),
-    MediaType: z.literal('Audio'),
-    Name: z.string(),
-    PremiereDate: z.null(),
-    ProviderIds: z.object({}),
-    Tags: z.array(genericItem),
-    UserId: z.string(),
+    Name: z.string().optional(),
 });
 
 const addToPlaylist = z.object({
@@ -705,6 +705,14 @@ const removeFromPlaylistParameters = z.object({
 });
 
 const deletePlaylist = z.null();
+
+const deletePlaylistImage = z.null();
+
+const deleteArtistImage = deletePlaylistImage;
+
+const uploadPlaylistImage = z.null();
+
+const uploadArtistImage = uploadPlaylistImage;
 
 const deletePlaylistParameters = z.object({
     Id: z.string(),
@@ -752,8 +760,42 @@ const serverInfo = z.object({
     Version: z.string(),
 });
 
+const taskTriggerInfo = z.object({
+    DayOfWeek: z.string().nullish(),
+    IntervalTicks: z.number().nullish(),
+    MaxRuntimeTicks: z.number().nullish(),
+    TimeOfDayTicks: z.number().nullish(),
+    Type: z.string().nullish(),
+});
+
+const taskResult = z.object({
+    EndTimeUtc: z.string().nullish(),
+    ErrorMessage: z.string().nullish(),
+    Id: z.string().nullish(),
+    Key: z.string().nullish(),
+    LongErrorMessage: z.string().nullish(),
+    Name: z.string().nullish(),
+    StartTimeUtc: z.string().nullish(),
+    Status: z.string().nullish(),
+});
+
+const taskInfo = z.object({
+    Category: z.string().nullish(),
+    CurrentProgressPercentage: z.number().nullish(),
+    Description: z.string().nullish(),
+    Id: z.string().nullish(),
+    IsHidden: z.boolean().optional(),
+    Key: z.string().nullish(),
+    LastExecutionResult: taskResult.nullish(),
+    Name: z.string().nullish(),
+    State: z.enum(['Idle', 'Cancelling', 'Running']).optional(),
+    Triggers: z.array(taskTriggerInfo).nullish(),
+});
+
+const scheduledTasks = z.array(taskInfo);
+
 const similarSongsParameters = z.object({
-    Fields: z.string().optional(),
+    Fields: z.array(z.string()).readonly().optional(),
     Limit: z.number().optional(),
     UserId: z.string().optional(),
 });
@@ -802,7 +844,7 @@ const folderList = pagination.extend({
 });
 
 const folderParameters = z.object({
-    Fields: z.string().optional(),
+    Fields: z.array(z.string()).readonly().optional(),
     ParentId: z.string().optional(),
     SortBy: z.string().optional(),
     SortOrder: z.enum(sortOrderValues).optional(),
@@ -829,6 +871,16 @@ const getSessions = z.array(
         }),
     ),
 );
+
+const studioListParameters = paginationParameters.merge(
+    baseParameters.extend({
+        NameStartsWithOrGreater: z.string().optional(),
+    }),
+);
+
+const studioList = z.object({
+    Items: z.array(studio),
+});
 
 export const jfType = {
     _enum: {
@@ -866,6 +918,7 @@ export const jfType = {
         similarSongs: similarSongsParameters,
         songDetail: songDetailParameters,
         songList: songListParameters,
+        studioList: studioListParameters,
         updatePlaylist: updatePlaylistParameters,
     },
     _response: {
@@ -876,7 +929,9 @@ export const jfType = {
         albumList,
         authenticate,
         createPlaylist,
+        deleteArtistImage,
         deletePlaylist,
+        deletePlaylistImage,
         error,
         favorite,
         filters,
@@ -893,14 +948,18 @@ export const jfType = {
         playlistList,
         playlistSongList,
         removeFromPlaylist,
+        scheduledTasks,
         scrobble,
         search,
         serverInfo,
         similarSongs,
         song,
         songList,
+        studioList,
         topSongsList,
         updatePlaylist,
+        uploadArtistImage,
+        uploadPlaylistImage,
         user,
     },
 };

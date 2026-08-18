@@ -7,26 +7,27 @@ import { CustomPlayerbarSlider } from './playerbar-slider';
 import styles from './playerbar-waveform.module.css';
 
 import { useSongUrl } from '/@/renderer/features/player/audio-player/hooks/use-stream-url';
+import { PlayerbarSeekSlider } from '/@/renderer/features/player/components/playerbar-seek-slider';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import {
     BarAlign,
-    useGeneralSettings,
     usePlaybackSettings,
+    usePlayerbarSlider,
     usePlayerSong,
     usePlayerTimestamp,
 } from '/@/renderer/store';
 import { useAppThemeColors, useColorScheme } from '/@/renderer/themes/use-app-theme';
-import { Spinner } from '/@/shared/components/spinner/spinner';
 import { Text } from '/@/shared/components/text/text';
 
 export const PlayerbarWaveform = () => {
     const currentSong = usePlayerSong();
-    const { transcode } = usePlaybackSettings();
-    const { playerbarSlider } = useGeneralSettings();
+    const playerbarSlider = usePlayerbarSlider();
     const currentTime = usePlayerTimestamp();
     const containerRef = useRef<HTMLDivElement>(null);
+    const audioElementRef = useRef<HTMLAudioElement>(document.createElement('audio'));
     const { mediaSeekToTimestamp } = usePlayer();
     const [isLoading, setIsLoading] = useState(true);
+    const [hasError, setHasError] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [tooltipPosition, setTooltipPosition] = useState<null | { x: number; y: number }>(null);
     const [tooltipValue, setTooltipValue] = useState(0);
@@ -36,7 +37,12 @@ export const PlayerbarWaveform = () => {
 
     const songDuration = currentSong?.duration ? currentSong.duration / 1000 : 0;
 
-    const streamUrl = useSongUrl(currentSong, true, transcode);
+    const { transcode } = usePlaybackSettings();
+    const streamUrl = useSongUrl(currentSong, true, {
+        bitrate: 64,
+        enabled: transcode.enabled,
+        format: 'mp3',
+    });
 
     const { color } = useAppThemeColors();
     const primaryColor = (color['--theme-colors-primary'] as string) || 'rgb(53, 116, 252)';
@@ -63,54 +69,80 @@ export const PlayerbarWaveform = () => {
         fillParent: true,
         height: 18,
         interact: false,
-        normalize: false,
+        media: audioElementRef.current,
+        normalize: playerbarSlider?.stretched ?? false,
         progressColor: primaryColor,
-        url: streamUrl || undefined,
         waveColor,
     });
 
     // Reset loading state when stream URL changes and ensure media is muted
     useEffect(() => {
         setIsLoading(true);
-        if (wavesurfer) {
-            wavesurfer.setVolume(0);
-            const mediaElement = wavesurfer.getMediaElement();
-            if (mediaElement) {
-                mediaElement.muted = true;
-                mediaElement.volume = 0;
-            }
-        }
-    }, [streamUrl, wavesurfer]);
+        setHasError(false);
+    }, [streamUrl]);
 
     // Handle waveform ready state
     useEffect(() => {
-        if (!wavesurfer) return;
+        if (!wavesurfer || !streamUrl) return;
+
+        // The wavesurfer instance is shared across stream URLs, and this
+        // effect subscribes before its (delayed) load actually starts. Guard
+        // against events that do not belong to this effect's own load:
+        // `cancelled` rejects events after the URL has moved on, and
+        // `loadStarted` rejects a still-in-flight previous load's `ready`
+        // (which would otherwise clear the loading state for the wrong
+        // track and hide the seek bar over an empty/stale waveform).
+        let cancelled = false;
+        let loadStarted = false;
 
         const handleReady = () => {
+            if (cancelled || !loadStarted) return;
             setIsLoading(false);
+            setHasError(false);
             const mediaElement = wavesurfer.getMediaElement();
             if (mediaElement) {
                 mediaElement.muted = true;
                 mediaElement.volume = 0;
             }
+        };
+
+        // A load failure previously left the waveform canvas empty with no
+        // seek control (the fallback slider only showed while loading), so
+        // the progress bar disappeared until the app was restarted. Surface
+        // real failures so the fallback slider is rendered again. AbortError
+        // is the expected outcome of a superseded load and is ignored.
+        const handleError = (error?: unknown) => {
+            if (cancelled || !loadStarted) return;
+            if (error instanceof Error && error.name === 'AbortError') return;
+            setIsLoading(false);
+            setHasError(true);
         };
 
         wavesurfer.on('ready', handleReady);
+        wavesurfer.on('error', handleError);
 
-        // Check if already loaded
-        if (wavesurfer.getDuration() > 0) {
-            setIsLoading(false);
-            const mediaElement = wavesurfer.getMediaElement();
-            if (mediaElement) {
-                mediaElement.muted = true;
-                mediaElement.volume = 0;
-            }
-        }
+        const waveformTimeout = setTimeout(
+            () => {
+                if (cancelled) return;
+                loadStarted = true;
+                wavesurfer.load(streamUrl).catch((error: unknown) => {
+                    if (cancelled || (error instanceof Error && error.name === 'AbortError')) {
+                        return;
+                    }
+                    setIsLoading(false);
+                    setHasError(true);
+                });
+            },
+            playerbarSlider?.loadingDelay ? playerbarSlider.loadingDelay * 1000 : 2000,
+        );
 
         return () => {
+            cancelled = true;
             wavesurfer.un('ready', handleReady);
+            wavesurfer.un('error', handleError);
+            clearTimeout(waveformTimeout);
         };
-    }, [wavesurfer]);
+    }, [wavesurfer, streamUrl, playerbarSlider.loadingDelay]);
 
     useEffect(() => {
         if (!wavesurfer) return;
@@ -354,14 +386,14 @@ export const PlayerbarWaveform = () => {
             style={{ position: 'relative' }}
         >
             <motion.div
-                animate={{ opacity: isLoading ? 0 : 1 }}
+                animate={{ opacity: isLoading || hasError ? 0 : 1 }}
                 className={styles.waveform}
                 initial={{ opacity: 0 }}
                 ref={containerRef}
                 transition={{ duration: 0.2 }}
             />
             <AnimatePresence>
-                {isLoading && (
+                {(isLoading || hasError) && (
                     <motion.div
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -370,12 +402,12 @@ export const PlayerbarWaveform = () => {
                             height: '100%',
                             left: 0,
                             position: 'absolute',
-                            top: 0,
+                            top: 3,
                             width: '100%',
                         }}
                         transition={{ duration: 0.2 }}
                     >
-                        <Spinner container />
+                        <PlayerbarSeekSlider max={songDuration} min={0} />
                     </motion.div>
                 )}
             </AnimatePresence>

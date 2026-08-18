@@ -31,8 +31,7 @@
 .image-container {
     position: relative;
     flex-shrink: 0;
-    width: var(--sidebar-image-height);
-    height: var(--sidebar-image-height);
+    min-height: 0;
     padding: var(--theme-spacing-md);
     cursor: pointer;
     animation: fade-in 0.2s ease-in-out;
@@ -53,6 +52,10 @@
     border-radius: var(--theme-radius-md);
 }
 
+.censored.sidebar-image {
+    filter: blur(20px);
+}
+
 .accordion-root {
     height: 100%;
 }
@@ -62,7 +65,8 @@
 }
 
 .accordion-control {
-    height: 2.5rem;
+    height: auto;
+    min-height: 2.5rem;
     border-radius: var(--theme-radius-md);
 
     &:hover {
@@ -77,10 +81,4 @@
 
 .accordion-content:last-child {
     padding-bottom: var(--theme-spacing-md);
-}
-
-.server-selector-wrapper {
-    position: relative;
-    z-index: 1;
-    flex-shrink: 0;
 }

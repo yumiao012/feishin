@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import i18n from '/@/i18n/i18n';
@@ -11,30 +11,28 @@ import { Text } from '/@/shared/components/text/text';
 
 const options = [
     {
-        label: i18n.t('setting.imageResolution_optionTable', { postProcess: 'sentenceCase' }),
+        label: i18n.t('setting.imageResolution_optionTable'),
         value: 'table',
     },
     {
-        label: i18n.t('setting.imageResolution_optionItemCard', { postProcess: 'sentenceCase' }),
+        label: i18n.t('setting.imageResolution_optionItemCard'),
         value: 'itemCard',
     },
     {
-        label: i18n.t('setting.imageResolution_optionSidebar', { postProcess: 'sentenceCase' }),
+        label: i18n.t('setting.imageResolution_optionSidebar'),
         value: 'sidebar',
     },
     {
-        label: i18n.t('setting.imageResolution_optionHeader', { postProcess: 'sentenceCase' }),
+        label: i18n.t('setting.imageResolution_optionHeader'),
         value: 'header',
     },
     {
-        label: i18n.t('setting.imageResolution_optionFullScreenPlayer', {
-            postProcess: 'sentenceCase',
-        }),
+        label: i18n.t('setting.imageResolution_optionFullScreenPlayer'),
         value: 'fullScreenPlayer',
     },
 ];
 
-export const ImageResolutionSettings = () => {
+export const ImageResolutionSettings = memo(() => {
     const { t } = useTranslation();
     const { setSettings } = useSettingsStoreActions();
     const settings = useGeneralSettings();
@@ -43,10 +41,9 @@ export const ImageResolutionSettings = () => {
 
     const descriptionText = t('setting.imageResolution', {
         context: 'description',
-        postProcess: 'sentenceCase',
     });
 
-    const titleText = t('setting.imageResolution', { postProcess: 'sentenceCase' });
+    const titleText = t('setting.imageResolution');
 
     return (
         <>
@@ -58,7 +55,7 @@ export const ImageResolutionSettings = () => {
                             size="compact-md"
                             variant={open ? 'subtle' : 'filled'}
                         >
-                            {t(open ? 'common.close' : 'common.edit', { postProcess: 'titleCase' })}
+                            {t(open ? 'common.close' : 'common.edit')}
                         </Button>
                     </>
                 }
@@ -78,9 +75,7 @@ export const ImageResolutionSettings = () => {
                                         max={2000}
                                         min={0}
                                         onChange={(e) => {
-                                            if (!e) return;
-
-                                            if (typeof e === 'string') return;
+                                            if (typeof e !== 'number') return;
 
                                             setSettings({
                                                 general: {
@@ -108,4 +103,4 @@ export const ImageResolutionSettings = () => {
             )}
         </>
     );
-};
+});

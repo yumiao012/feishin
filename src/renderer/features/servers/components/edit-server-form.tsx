@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '/@/i18n/i18n';
 import { api } from '/@/renderer/api';
 import { queryClient } from '/@/renderer/lib/react-query';
-import { useAuthStoreActions } from '/@/renderer/store';
+import { getServerById, useAuthStoreActions } from '/@/renderer/store';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
@@ -36,7 +36,7 @@ interface EditServerFormProps {
 
 const ModifiedFieldIndicator = () => {
     return (
-        <Tooltip label={i18n.t('common.modified', { postProcess: 'titleCase' }) as string}>
+        <Tooltip label={i18n.t('common.modified') as string}>
             <Icon color="warn" icon="info" />
         </Tooltip>
     );
@@ -44,7 +44,7 @@ const ModifiedFieldIndicator = () => {
 
 export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditServerFormProps) => {
     const { t } = useTranslation();
-    const { updateServer } = useAuthStoreActions();
+    const { setCurrentServer, updateServer } = useAuthStoreActions();
     const focusTrapRef = useFocusTrap();
     const [isLoading, setIsLoading] = useState(false);
 
@@ -55,6 +55,8 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
             name: server?.name,
             password: password || '',
             preferInstantMix: server.preferInstantMix,
+            preferRemoteUrl: server?.preferRemoteUrl || false,
+            remoteUrl: server?.remoteUrl || '',
             savePassword: server.savePassword,
             type: server?.type,
             url: server?.url,
@@ -66,43 +68,81 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
     const isNavidrome = form.values.type === ServerType.NAVIDROME;
 
     const handleSubmit = form.onSubmit(async (values) => {
-        const authFunction = api.controller.authenticate;
-
-        if (!authFunction) {
-            return toast.error({
-                message: t('error.invalidServer', { postProcess: 'sentenceCase' }),
-            });
-        }
-
         try {
             setIsLoading(true);
-            const data: AuthenticationResponse | undefined = await authFunction(
-                values.url,
-                {
-                    legacy: values.legacyAuth,
-                    password: values.password,
-                    username: values.username,
-                },
-                values.type,
-            );
 
-            if (!data) {
-                return toast.error({
-                    message: t('error.authenticationFailed', { postProcess: 'sentenceCase' }),
-                });
+            // Check if we can skip authentication
+            const usernameChanged = values.username !== server.username;
+            const passwordProvided = values.password && values.password.trim() !== '';
+            const urlChanged = values.url !== server.url;
+            const typeChanged = values.type !== server.type;
+
+            // Skip authentication if username hasn't changed, password is empty, and URL/type haven't changed
+            const canSkipAuth =
+                !usernameChanged && !passwordProvided && !urlChanged && !typeChanged;
+
+            let data: AuthenticationResponse | undefined;
+            let serverItem: ServerListItemWithCredential;
+
+            if (canSkipAuth) {
+                // Use existing server credentials
+                const existingServer = getServerById(server.id);
+                if (!existingServer) {
+                    return toast.error({
+                        message: t('error.invalidServer'),
+                    });
+                }
+
+                serverItem = {
+                    ...existingServer,
+                    id: server.id,
+                    name: values.name,
+                    type: values.type,
+                    url: values.url,
+                };
+            } else {
+                // Need to authenticate
+                const authFunction = api.controller.authenticate;
+
+                if (!authFunction) {
+                    return toast.error({
+                        message: t('error.invalidServer'),
+                    });
+                }
+
+                data = await authFunction(
+                    values.url,
+                    {
+                        legacy: values.legacyAuth,
+                        password: values.password,
+                        username: values.username,
+                    },
+                    values.type,
+                );
+
+                if (!data) {
+                    return toast.error({
+                        message: t('error.authenticationFailed'),
+                    });
+                }
+
+                serverItem = {
+                    credential: data.credential,
+                    id: server.id,
+                    isAdmin: data.isAdmin,
+                    name: values.name,
+                    type: values.type,
+                    url: values.url,
+                    userId: data.userId,
+                    username: data.username,
+                };
+
+                if (data.ndCredential !== undefined) {
+                    serverItem.ndCredential = data.ndCredential;
+                }
             }
 
-            const serverItem: ServerListItemWithCredential = {
-                credential: data.credential,
-                id: server.id,
-                isAdmin: data.isAdmin,
-                name: values.name,
-                type: values.type,
-                url: values.url,
-                userId: data.userId,
-                username: data.username,
-            };
-
+            // Update optional fields
             if (values.preferInstantMix !== undefined) {
                 serverItem.preferInstantMix = values.preferInstantMix;
             }
@@ -111,28 +151,53 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 serverItem.savePassword = values.savePassword;
             }
 
-            if (data.ndCredential !== undefined) {
-                serverItem.ndCredential = data.ndCredential;
+            if (values.remoteUrl?.trim()) {
+                serverItem.remoteUrl = values.remoteUrl.trim().replace(/\/$/, '');
+            } else {
+                serverItem.remoteUrl = undefined;
+            }
+
+            if (values.preferRemoteUrl !== undefined) {
+                serverItem.preferRemoteUrl = values.preferRemoteUrl;
             }
 
             updateServer(server.id, serverItem);
+
+            // After re-authenticating, switch to the updated server so the user
+            // isn't left on the credentials / server-required screen.
+            if (!canSkipAuth) {
+                const updated = getServerById(server.id);
+                if (updated) {
+                    setCurrentServer(updated);
+                }
+            }
+
             toast.success({
-                message: t('form.updateServer.title', { postProcess: 'sentenceCase' }),
+                message: t('form.updateServer.title'),
             });
 
+            // Handle password saving in local settings
             if (localSettings) {
-                if (values.savePassword) {
-                    const saved = await localSettings.passwordSet(values.password, server.id);
-                    if (!saved) {
-                        toast.error({
-                            message: t('form.addServer.error', {
-                                context: 'savePassword',
-                                postProcess: 'sentenceCase',
-                            }),
-                        });
+                if (canSkipAuth) {
+                    // If we skipped auth, only update savePassword preference
+                    // Don't change the actual saved password
+                    if (!values.savePassword) {
+                        localSettings.passwordRemove(server.id);
                     }
                 } else {
-                    localSettings.passwordRemove(server.id);
+                    // If we authenticated, update password if savePassword is enabled
+                    if (values.savePassword && passwordProvided) {
+                        const saved = await localSettings.passwordSet(values.password, server.id);
+                        if (!saved) {
+                            toast.error({
+                                message: t('form.addServer.error', {
+                                    context: 'savePassword',
+                                }),
+                            });
+                        }
+                    } else if (!values.savePassword) {
+                        localSettings.passwordRemove(server.id);
+                    }
                 }
             }
 
@@ -152,7 +217,6 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 <TextInput
                     label={t('form.addServer.input', {
                         context: 'name',
-                        postProcess: 'titleCase',
                     })}
                     required
                     rightSection={form.isDirty('name') && <ModifiedFieldIndicator />}
@@ -161,7 +225,6 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 <TextInput
                     label={t('form.addServer.input', {
                         context: 'url',
-                        postProcess: 'titleCase',
                     })}
                     required
                     rightSection={form.isDirty('url') && <ModifiedFieldIndicator />}
@@ -169,8 +232,30 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 />
                 <TextInput
                     label={t('form.addServer.input', {
+                        context: 'remoteUrl',
+                    })}
+                    placeholder={t('form.addServer.input', {
+                        context: 'remoteUrlPlaceholder',
+                    })}
+                    rightSection={form.isDirty('remoteUrl') && <ModifiedFieldIndicator />}
+                    {...form.getInputProps('remoteUrl')}
+                />
+                {form.values.remoteUrl && (
+                    <Group gap="xs">
+                        <Checkbox
+                            label={t('form.addServer.input', {
+                                context: 'preferRemoteUrl',
+                            })}
+                            {...form.getInputProps('preferRemoteUrl', {
+                                type: 'checkbox',
+                            })}
+                        />
+                        {form.isDirty('preferRemoteUrl') && <ModifiedFieldIndicator />}
+                    </Group>
+                )}
+                <TextInput
+                    label={t('form.addServer.input', {
                         context: 'username',
-                        postProcess: 'titleCase',
                     })}
                     required
                     rightSection={form.isDirty('username') && <ModifiedFieldIndicator />}
@@ -180,16 +265,13 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                     data-autofocus
                     label={t('form.addServer.input', {
                         context: 'password',
-                        postProcess: 'titleCase',
                     })}
-                    required={isNavidrome || isSubsonic}
                     {...form.getInputProps('password')}
                 />
                 {localSettings && isNavidrome && (
                     <Checkbox
                         label={t('form.addServer.input', {
                             context: 'savePassword',
-                            postProcess: 'titleCase',
                         })}
                         {...form.getInputProps('savePassword', {
                             type: 'checkbox',
@@ -200,7 +282,6 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                     <Checkbox
                         label={t('form.addServer.input', {
                             context: 'legacyAuthentication',
-                            postProcess: 'titleCase',
                         })}
                         {...form.getInputProps('legacyAuth', {
                             type: 'checkbox',
@@ -211,11 +292,9 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                     <Checkbox
                         description={t('form.addServer.input', {
                             context: 'preferInstantMixDescription',
-                            postProcess: 'sentenceCase',
                         })}
                         label={t('form.addServer.input', {
                             context: 'preferInstantMix',
-                            postProcess: 'titleCase',
                         })}
                         {...form.getInputProps('preferInstantMix', {
                             type: 'checkbox',

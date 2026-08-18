@@ -23,6 +23,7 @@ export const GenreListInfiniteTable = ({
     autoFitColumns = false,
     columns,
     enableAlternateRowColors = false,
+    enableHeader = true,
     enableHorizontalBorders = false,
     enableRowHoverHighlight = true,
     enableSelection = true,
@@ -43,15 +44,16 @@ export const GenreListInfiniteTable = ({
 
     const listQueryFn = api.controller.getGenreList;
 
-    const { data, onRangeChanged } = useItemListInfiniteLoader({
-        eventKey: ItemListKey.GENRE,
-        itemsPerPage,
-        itemType: LibraryItem.GENRE,
-        listCountQuery,
-        listQueryFn,
-        query,
-        serverId,
-    });
+    const { getItem, getItemIndex, getLoadedItems, itemCount, loadedItems, onRangeChanged } =
+        useItemListInfiniteLoader({
+            eventKey: ItemListKey.GENRE,
+            itemsPerPage,
+            itemType: LibraryItem.GENRE,
+            listCountQuery,
+            listQueryFn,
+            query,
+            serverId,
+        });
 
     const { handleOnScrollEnd, scrollOffset } = useItemListScrollPersist({
         enabled: saveScrollOffset,
@@ -70,17 +72,22 @@ export const GenreListInfiniteTable = ({
             autoFitColumns={autoFitColumns}
             CellComponent={ItemTableListColumn}
             columns={columns}
-            data={data}
+            data={loadedItems}
             enableAlternateRowColors={enableAlternateRowColors}
             enableExpansion={false}
+            enableHeader={enableHeader}
             enableHorizontalBorders={enableHorizontalBorders}
             enableRowHoverHighlight={enableRowHoverHighlight}
             enableSelection={enableSelection}
             enableVerticalBorders={enableVerticalBorders}
+            getItem={getItem}
+            getItemIndex={getItemIndex}
+            getLoadedItems={getLoadedItems}
             initialTop={{
                 to: scrollOffset ?? 0,
                 type: 'offset',
             }}
+            itemCount={itemCount}
             itemType={LibraryItem.GENRE}
             onColumnReordered={handleColumnReordered}
             onColumnResized={handleColumnResized}

@@ -8,26 +8,72 @@ import md5 from 'md5';
 import { z } from 'zod';
 
 import { contract, ssApiClient } from '/@/renderer/api/subsonic/subsonic-api';
+import { mapStructuredLyric } from '/@/renderer/api/subsonic/subsonic-structured-lyrics';
+import {
+    getDefaultTranscodingProfiles,
+    getDirectPlayProfiles,
+} from '/@/renderer/features/player/components/audio-players';
 import { randomString } from '/@/renderer/utils';
+import { logger } from '/@/renderer/utils/logger';
+import { getServerUrl } from '/@/renderer/utils/normalize-server-url';
 import { ssNormalize } from '/@/shared/api/subsonic/subsonic-normalize';
 import {
     AlbumListSortType,
     ssType,
     SubsonicExtensions,
 } from '/@/shared/api/subsonic/subsonic-types';
-import { hasFeature, sortAlbumArtistList, sortAlbumList, sortSongList } from '/@/shared/api/utils';
+import {
+    hasFeature,
+    hasFeatureWithVersion,
+    sortAlbumArtistList,
+    sortAlbumList,
+    sortSongList,
+} from '/@/shared/api/utils';
 import {
     AlbumListSort,
     GenreListSort,
+    ImageArgs,
+    ImageRequest,
     InternalControllerEndpoint,
     LibraryItem,
     PlaylistListSort,
+    ReplaceApiClientProps,
     ServerType,
     Song,
     SongListSort,
     SortOrder,
 } from '/@/shared/types/domain-types';
 import { ServerFeature, ServerFeatures } from '/@/shared/types/features-types';
+
+const getSubsonicImageRequest = ({
+    apiClientProps: { server },
+    baseUrl,
+    query,
+}: ReplaceApiClientProps<ImageArgs>): ImageRequest | null => {
+    const { id, size } = query;
+    const imageSize = size;
+    const url = baseUrl || getServerUrl(server);
+
+    if (!url || !server?.credential) {
+        return null;
+    }
+
+    // Check for default placeholder image ID
+    if (id.match('2a96cbd8b46e442fc41c2b86b821562f')) {
+        return null;
+    }
+
+    return {
+        cacheKey: ['subsonic', server.id, baseUrl || '', id, imageSize || ''].join(':'),
+        url:
+            `${url}/rest/getCoverArt.view` +
+            `?id=${id}` +
+            `&${server.credential}` +
+            '&v=1.13.0' +
+            '&c=Feishin' +
+            (imageSize ? `&size=${imageSize}` : ''),
+    };
+};
 
 const ALBUM_LIST_SORT_MAPPING: Record<AlbumListSort, AlbumListSortType | undefined> = {
     [AlbumListSort.ALBUM_ARTIST]: AlbumListSortType.ALPHABETICAL_BY_ARTIST,
@@ -37,6 +83,7 @@ const ALBUM_LIST_SORT_MAPPING: Record<AlbumListSort, AlbumListSortType | undefin
     [AlbumListSort.DURATION]: undefined,
     [AlbumListSort.EXPLICIT_STATUS]: undefined,
     [AlbumListSort.FAVORITED]: AlbumListSortType.STARRED,
+    [AlbumListSort.ID]: undefined,
     [AlbumListSort.NAME]: AlbumListSortType.ALPHABETICAL_BY_NAME,
     [AlbumListSort.PLAY_COUNT]: AlbumListSortType.FREQUENT,
     [AlbumListSort.RANDOM]: AlbumListSortType.RANDOM,
@@ -45,11 +92,178 @@ const ALBUM_LIST_SORT_MAPPING: Record<AlbumListSort, AlbumListSortType | undefin
     [AlbumListSort.RECENTLY_PLAYED]: AlbumListSortType.RECENT,
     [AlbumListSort.RELEASE_DATE]: AlbumListSortType.BY_YEAR,
     [AlbumListSort.SONG_COUNT]: undefined,
+    [AlbumListSort.SORT_NAME]: AlbumListSortType.ALPHABETICAL_BY_NAME,
     [AlbumListSort.YEAR]: AlbumListSortType.BY_YEAR,
 };
 
 const MAX_SUBSONIC_ITEMS = 500;
 const SUBSONIC_FAST_BATCH_SIZE = MAX_SUBSONIC_ITEMS * 10;
+
+// const TRANSCODE_DIRECT_PLAY_PROFILES = [
+//     {
+//         audioCodecs: ['mp3'],
+//         containers: ['mp3'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+//     {
+//         audioCodecs: ['aac'],
+//         containers: ['m4a', 'mp4'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+//     {
+//         audioCodecs: ['vorbis'],
+//         containers: ['ogg'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+//     {
+//         audioCodecs: ['opus'],
+//         containers: ['ogg', 'webm'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+//     {
+//         audioCodecs: ['pcm'],
+//         containers: ['wav'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+//     {
+//         audioCodecs: ['flac'],
+//         containers: ['flac'],
+//         maxAudioChannels: 2,
+//         protocols: ['http'],
+//     },
+// ];
+
+// const TRANSCODE_UNSUPPORTED_DIRECT_PLAY_PROFILES = [
+//     {
+//       containers: ["m4a", "mp4"],
+//       audioCodecs: ["alac"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["m4a", "mp4"],
+//       audioCodecs: ["ac3", "eac3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 6
+//     },
+//     {
+//       containers: ["ogg"],
+//       audioCodecs: ["flac", "speex"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["wav"],
+//       audioCodecs: ["adpcm", "gsm", "aac", "mp3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["mkv"],
+//       audioCodecs: ["aac", "mp3", "flac", "opus", "vorbis", "ac3", "eac3", "dts"],
+//       protocols: ["http"],
+//       maxAudioChannels: 8
+//     },
+//     {
+//       containers: ["avi"],
+//       audioCodecs: ["mp3", "ac3", "pcm", "aac"],
+//       protocols: ["http"],
+//       maxAudioChannels: 6
+//     },
+//     {
+//       containers: ["asf", "wma"],
+//       audioCodecs: ["wma", "pcm", "mp3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["caf"],
+//       audioCodecs: ["pcm", "aac", "alac", "mp3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 8
+//     },
+//     {
+//       containers: ["3gp"],
+//       audioCodecs: ["aac", "amr"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["amr"],
+//       audioCodecs: ["amr"],
+//       protocols: ["http"],
+//       maxAudioChannels: 1
+//     },
+//     {
+//       containers: ["ape"],
+//       audioCodecs: ["ape"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["wv"],
+//       audioCodecs: ["wavpack"],
+//       protocols: ["http"],
+//       maxAudioChannels: 2
+//     },
+//     {
+//       containers: ["ac3"],
+//       audioCodecs: ["ac3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 6
+//     },
+//     {
+//       containers: ["eac3"],
+//       audioCodecs: ["eac3"],
+//       protocols: ["http"],
+//       maxAudioChannels: 8
+//     },
+//     {
+//       containers: ["dts"],
+//       audioCodecs: ["dts"],
+//       protocols: ["http"],
+//       maxAudioChannels: 8
+//     }
+//   ];
+
+function appendTranscodeParams(url: string, format?: string, bitrate?: number) {
+    let streamUrl = url;
+
+    if (format) {
+        streamUrl += `&format=${format}`;
+    }
+    if (bitrate !== undefined) {
+        streamUrl += `&maxBitRate=${bitrate}`;
+    }
+
+    return streamUrl;
+}
+
+function buildGetTranscodeStreamUrl(
+    server: null | undefined | { credential?: string; url?: string },
+    args: {
+        mediaId: string;
+        mediaType: 'podcast' | 'song';
+        offset: number;
+        transcodeParams: string;
+    },
+): string {
+    const params = new URLSearchParams({
+        c: 'Feishin',
+        mediaId: args.mediaId,
+        mediaType: args.mediaType,
+        offset: String(args.offset),
+        transcodeParams: args.transcodeParams,
+        v: '1.13.0',
+    });
+
+    return `${server?.url}/rest/getTranscodeStream.view?${params.toString()}&${server?.credential}`;
+}
 
 function sortAndPaginate<T>(
     items: T[],
@@ -159,7 +373,10 @@ export const SubsonicController: InternalControllerEndpoint = {
                     query.type === LibraryItem.ALBUM_ARTIST || query.type === LibraryItem.ARTIST
                         ? query.id
                         : undefined,
-                id: query.type === LibraryItem.SONG ? query.id : undefined,
+                id:
+                    query.type === LibraryItem.SONG || query.type === LibraryItem.PLAYLIST_SONG
+                        ? query.id
+                        : undefined,
             },
         });
 
@@ -212,7 +429,10 @@ export const SubsonicController: InternalControllerEndpoint = {
                     query.type === LibraryItem.ALBUM_ARTIST || query.type === LibraryItem.ARTIST
                         ? query.id
                         : undefined,
-                id: query.type === LibraryItem.SONG ? query.id : undefined,
+                id:
+                    query.type === LibraryItem.SONG || query.type === LibraryItem.PLAYLIST_SONG
+                        ? query.id
+                        : undefined,
             },
         });
 
@@ -255,12 +475,6 @@ export const SubsonicController: InternalControllerEndpoint = {
     getAlbumArtistDetail: async (args) => {
         const { apiClientProps, query } = args;
 
-        const artistInfoRes = await ssApiClient(apiClientProps).getArtistInfo({
-            query: {
-                id: query.id,
-            },
-        });
-
         const res = await ssApiClient(apiClientProps).getArtist({
             query: {
                 id: query.id,
@@ -273,18 +487,39 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         const artist = res.body.artist;
 
-        let artistInfo;
-        if (artistInfoRes.status === 200) {
-            artistInfo = artistInfoRes.body.artistInfo;
+        return {
+            ...ssNormalize.albumArtist(artist, apiClientProps.server),
+            albums: artist.album?.map((album) => ssNormalize.album(album, apiClientProps.server)),
+            similarArtists: null,
+        };
+    },
+    getAlbumArtistInfo: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const artistInfoRes = await ssApiClient(apiClientProps).getArtistInfo2({
+            query: {
+                id: query.id,
+                ...(query.limit != null && { count: query.limit }),
+            },
+        });
+
+        if (artistInfoRes.status !== 200) {
+            return null;
         }
 
+        const artistInfo = artistInfoRes.body.artistInfo2;
+
         return {
-            ...ssNormalize.albumArtist(artist, apiClientProps.server, 300),
-            albums: artist.album?.map((album) => ssNormalize.album(album, apiClientProps.server)),
+            biography: artistInfo?.biography || null,
             similarArtists:
-                artistInfo?.similarArtist?.map((artist) =>
-                    ssNormalize.albumArtist(artist, apiClientProps.server, 300),
-                ) || null,
+                artistInfo?.similarArtist?.map((artist) => ({
+                    id: String(artist.id),
+                    imageId: artist.coverArt ?? String(artist.id),
+                    imageUrl: null,
+                    name: artist.name,
+                    userFavorite: Boolean(artist.starred) || false,
+                    userRating: artist.userRating ?? null,
+                })) ?? null,
         };
     },
     getAlbumArtistList: async (args) => {
@@ -303,7 +538,7 @@ export const SubsonicController: InternalControllerEndpoint = {
         const artists = (res.body.artists?.index || []).flatMap((index) => index.artist);
 
         let results = artists.map((artist) =>
-            ssNormalize.albumArtist(artist, apiClientProps.server, 300),
+            ssNormalize.albumArtist(artist, apiClientProps.server),
         );
 
         if (query.searchTerm) {
@@ -314,15 +549,17 @@ export const SubsonicController: InternalControllerEndpoint = {
             results = searchResults;
         }
 
-        if (query.sortBy) {
-            results = sortAlbumArtistList(results, query.sortBy, query.sortOrder);
+        if (query.favorite) {
+            results = results.filter((artist) => artist.userFavorite);
         }
 
-        return {
-            items: results,
+        return sortAndPaginate(results, {
+            limit: query.limit,
+            sortBy: query.sortBy,
+            sortFn: query.sortBy ? sortAlbumArtistList : undefined,
+            sortOrder: query.sortOrder,
             startIndex: query.startIndex,
-            totalRecordCount: artists.length,
-        };
+        });
     },
     getAlbumArtistListCount: (args) =>
         SubsonicController.getAlbumArtistList({
@@ -354,6 +591,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                     albumOffset: query.startIndex,
                     artistCount: 0,
                     artistOffset: 0,
+                    musicFolderId: getLibraryId(query.musicFolderId),
                     query: query.searchTerm || '',
                     songCount: 0,
                     songOffset: 0,
@@ -488,7 +726,7 @@ export const SubsonicController: InternalControllerEndpoint = {
         return {
             items:
                 res.body.albumList2.album?.map((album) =>
-                    ssNormalize.album(album, apiClientProps.server, 300),
+                    ssNormalize.album(album, apiClientProps.server),
                 ) || [],
             startIndex: query.startIndex,
             totalRecordCount: null,
@@ -509,6 +747,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                         albumOffset: startIndex,
                         artistCount: 0,
                         artistOffset: 0,
+                        musicFolderId: getLibraryId(query.musicFolderId),
                         query: query.searchTerm || '',
                         songCount: 0,
                         songOffset: 0,
@@ -637,6 +876,28 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         return totalRecordCount;
     },
+    getAlbumRadio: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const res = await ssApiClient(apiClientProps).getSimilarSongs({
+            query: {
+                count: query.count,
+                id: query.albumId,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to get album radio songs');
+        }
+
+        if (!res.body.similarSongs?.song) {
+            return [];
+        }
+
+        return res.body.similarSongs.song.map((song) =>
+            ssNormalize.song(song, apiClientProps.server),
+        );
+    },
     getArtistList: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -658,7 +919,7 @@ export const SubsonicController: InternalControllerEndpoint = {
         }
 
         let results = artists.map((artist) =>
-            ssNormalize.albumArtist(artist, apiClientProps.server, 300),
+            ssNormalize.albumArtist(artist, apiClientProps.server),
         );
 
         if (query.searchTerm) {
@@ -715,10 +976,60 @@ export const SubsonicController: InternalControllerEndpoint = {
             '&c=Feishin'
         );
     },
+    getFavoriteSongs: async (args) => {
+        const { apiClientProps, query } = args;
+
+        // if user selects 'rating'
+        if (query.type === 'rating') {
+            const res = await SubsonicController.getSongList({
+                apiClientProps,
+                query: {
+                    artistIds: [query.artistId],
+                    sortBy: SongListSort.RATING,
+                    sortOrder: SortOrder.DESC,
+                    startIndex: 0,
+                },
+            });
+
+            const songsWithHighRating = orderBy(
+                res.items.filter((song) => song.userRating !== null && song.userRating > 2),
+                ['userRating', 'userFavorite', 'playCount', 'albumId', 'trackNumber'],
+                ['desc', 'desc', 'desc', 'asc', 'asc'],
+            );
+
+            return {
+                items: songsWithHighRating,
+                startIndex: 0,
+                totalRecordCount: res.totalRecordCount,
+            };
+        }
+
+        // else if user selects 'favorites'
+        const res = await SubsonicController.getSongList({
+            apiClientProps,
+            query: {
+                artistIds: [query.artistId],
+                sortBy: SongListSort.FAVORITED,
+                sortOrder: SortOrder.DESC,
+                startIndex: 0,
+            },
+        });
+        const songsWithFavorite = orderBy(
+            res.items.filter((song) => song.userFavorite),
+            ['userFavorite', 'userRating', 'playCount', 'albumId', 'trackNumber'],
+            ['desc', 'desc', 'desc', 'asc', 'asc'],
+        );
+
+        return {
+            items: songsWithFavorite,
+            startIndex: 0,
+            totalRecordCount: res.totalRecordCount,
+        };
+    },
     getFolder: async ({ apiClientProps, query }) => {
         const sortOrder = (query.sortOrder?.toLowerCase() ?? 'asc') as 'asc' | 'desc';
 
-        const isRootFolderId = /^\d+$/.test(query.id);
+        const isRootFolderId = query.id === '0';
 
         if (isRootFolderId) {
             const res = await ssApiClient(apiClientProps).getIndexes({
@@ -735,6 +1046,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                 res.body.indexes?.index?.flatMap((idx) =>
                     idx.artist.map((artist) => ({
                         artist: artist.name,
+                        coverArt: artist.coverArt,
                         id: artist.id.toString(),
                         isDir: true,
                         title: artist.name,
@@ -835,8 +1147,14 @@ export const SubsonicController: InternalControllerEndpoint = {
         }
 
         switch (query.sortBy) {
+            case GenreListSort.ALBUM_COUNT:
+                results = orderBy(results, [(v) => v.albumCount], [sortOrder]);
+                break;
             case GenreListSort.NAME:
                 results = orderBy(results, [(v) => v.value.toLowerCase()], [sortOrder]);
+                break;
+            case GenreListSort.SONG_COUNT:
+                results = orderBy(results, [(v) => v.songCount], [sortOrder]);
                 break;
             default:
                 break;
@@ -849,28 +1167,8 @@ export const SubsonicController: InternalControllerEndpoint = {
             startIndex: query.startIndex,
         });
     },
-    getImageUrl: ({ apiClientProps: { server }, query }) => {
-        const { id, size } = query;
-        const imageSize = size;
-
-        if (!server?.url || !server?.credential) {
-            return null;
-        }
-
-        // Check for default placeholder image ID
-        if (id.match('2a96cbd8b46e442fc41c2b86b821562f')) {
-            return null;
-        }
-
-        return (
-            `${server.url}/rest/getCoverArt.view` +
-            `?id=${id}` +
-            `&${server.credential}` +
-            '&v=1.13.0' +
-            '&c=Feishin' +
-            (imageSize ? `&size=${imageSize}` : '')
-        );
-    },
+    getImageRequest: getSubsonicImageRequest,
+    getImageUrl: (args) => getSubsonicImageRequest(args)?.url || null,
     getInternetRadioStations: async (args) => {
         const { apiClientProps } = args;
 
@@ -919,7 +1217,7 @@ export const SubsonicController: InternalControllerEndpoint = {
         return ssNormalize.playlist(res.body.playlist, apiClientProps.server);
     },
     getPlaylistList: async ({ apiClientProps, query }) => {
-        const sortOrder = query.sortOrder.toLowerCase() as 'asc' | 'desc';
+        const sortOrder = (query.sortOrder || SortOrder.ASC).toLowerCase() as 'asc' | 'desc';
 
         const res = await ssApiClient(apiClientProps).getPlaylists({});
 
@@ -988,6 +1286,11 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         return results.length;
     },
+    getPlaylistSongIds: async (args) =>
+        SubsonicController.getPlaylistSongList(args).then((result) => ({
+            ...result,
+            items: result.items.map((song) => song.id),
+        })),
     getPlaylistSongList: async ({ apiClientProps, query }) => {
         const res = await ssApiClient(apiClientProps).getPlaylist({
             query: {
@@ -1000,8 +1303,9 @@ export const SubsonicController: InternalControllerEndpoint = {
         }
 
         const items =
-            res.body.playlist.entry?.map((song) => ssNormalize.song(song, apiClientProps.server)) ||
-            [];
+            res.body.playlist.entry?.map((song, index) =>
+                ssNormalize.song(song, apiClientProps.server, index),
+            ) || [];
 
         return {
             items,
@@ -1014,25 +1318,25 @@ export const SubsonicController: InternalControllerEndpoint = {
             const res = await ssApiClient(apiClientProps).getPlayQueueByIndex();
 
             if (res.status !== 200) {
-                throw new Error('Failed to get random songs');
+                throw new Error('Failed to get play queue');
             }
 
             const { changed, changedBy, currentIndex, entry, position, username } =
-                res.body.playQueueByIndex;
+                res.body.playQueueByIndex || {}; // if there is no queue saved, playQueueByIndex may be undefined from a bug in Navidrome
 
             return {
-                changed,
-                changedBy,
+                changed: changed ?? '',
+                changedBy: changedBy ?? '',
                 currentIndex: currentIndex ?? 0,
                 entry: entry?.map((song) => ssNormalize.song(song, apiClientProps.server)) || [],
                 positionMs: position ?? 0,
-                username,
+                username: username ?? '',
             };
         } else {
             const res = await ssApiClient(apiClientProps).getPlayQueue();
 
             if (res.status !== 200) {
-                throw new Error('Failed to get random songs');
+                throw new Error('Failed to get play queue');
             }
 
             const { changed, changedBy, current, entry, position, username } = res.body.playQueue;
@@ -1101,6 +1405,22 @@ export const SubsonicController: InternalControllerEndpoint = {
         final.splice(0, 0, { label: 'all artists', value: '' });
         return final;
     },
+    getScanStatus: async (args) => {
+        const { apiClientProps } = args;
+
+        const res = await ssApiClient(apiClientProps).getScanStatus({ query: {} });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to get scan status');
+        }
+
+        return {
+            count: res.body.scanStatus.count,
+            folderCount: res.body.scanStatus.folderCount,
+            lastScan: res.body.scanStatus.lastScan,
+            scanning: res.body.scanStatus.scanning,
+        };
+    },
     getServerInfo: async (args) => {
         const { apiClientProps } = args;
 
@@ -1129,8 +1449,12 @@ export const SubsonicController: InternalControllerEndpoint = {
             }
         }
 
+        if (subsonicFeatures[SubsonicExtensions.TRANSCODING]) {
+            features.osTranscodeDecision = [1];
+        }
+
         if (subsonicFeatures[SubsonicExtensions.SONG_LYRICS]) {
-            features.lyricsMultipleStructured = [1];
+            features.lyricsMultipleStructured = subsonicFeatures[SubsonicExtensions.SONG_LYRICS];
         }
 
         if (subsonicFeatures[SubsonicExtensions.FORM_POST]) {
@@ -1139,6 +1463,26 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         if (subsonicFeatures[SubsonicExtensions.INDEX_BASED_QUEUE]) {
             features.serverPlayQueue = [1];
+        }
+
+        if (subsonicFeatures[SubsonicExtensions.PLAYBACK_REPORT]) {
+            features.reportPlayback = [1];
+        }
+        try {
+            const jukeboxStatus = await ssApiClient(apiClientProps).jukeboxControl({
+                query: { action: 'status' },
+            });
+
+            if (jukeboxStatus.status === 200 && !(jukeboxStatus.body as any)?.error) {
+                features[ServerFeature.JUKEBOX] = [1];
+            } else {
+                logger.warn(
+                    'Jukebox endpoint returned an error payload:',
+                    (jukeboxStatus.body as any)?.error,
+                );
+            }
+        } catch (error) {
+            logger.warn('Jukebox is not supported by this server:', error);
         }
 
         return { features, id: apiClientProps.server?.id, version: ping.body.serverVersion };
@@ -1195,6 +1539,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                     albumOffset: 0,
                     artistCount: 0,
                     artistOffset: 0,
+                    musicFolderId: getLibraryId(query.musicFolderId),
                     query: query.searchTerm || '',
                     songCount: query.limit,
                     songOffset: query.startIndex,
@@ -1249,10 +1594,19 @@ export const SubsonicController: InternalControllerEndpoint = {
                 throw new Error('Failed to get song list');
             }
 
-            const allResults =
+            let allResults =
                 (res.body.starred?.song || []).map((song) =>
                     ssNormalize.song(song, apiClientProps.server),
                 ) || [];
+
+            const filterArtistIds = query.albumArtistIds || query.artistIds;
+
+            if (filterArtistIds?.length) {
+                const idSet = new Set(filterArtistIds);
+                allResults = allResults.filter((song) =>
+                    song.albumArtists?.some((aa) => idSet.has(aa.id)),
+                );
+            }
 
             return sortAndPaginate(allResults, {
                 limit: query.limit,
@@ -1339,6 +1693,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                 albumOffset: 0,
                 artistCount: 0,
                 artistOffset: 0,
+                musicFolderId: getLibraryId(query.musicFolderId),
                 query: query.searchTerm || '',
                 songCount: query.limit,
                 songOffset: query.startIndex,
@@ -1379,6 +1734,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                         albumOffset: 0,
                         artistCount: 0,
                         artistOffset: 0,
+                        musicFolderId: getLibraryId(query.musicFolderId),
                         query: query.searchTerm || '',
                         songCount: MAX_SUBSONIC_ITEMS,
                         songOffset: startIndex,
@@ -1470,6 +1826,76 @@ export const SubsonicController: InternalControllerEndpoint = {
             return (res.body.starred?.song || []).length || 0;
         }
 
+        const artistIds = query.albumArtistIds || query.artistIds;
+
+        if (query.albumIds || artistIds) {
+            const fromAlbumPromises: Promise<ServerInferResponses<typeof contract.getAlbum>>[] = [];
+            const artistDetailPromises: Promise<ServerInferResponses<typeof contract.getArtist>>[] =
+                [];
+
+            if (query.albumIds) {
+                for (const albumId of query.albumIds) {
+                    fromAlbumPromises.push(
+                        ssApiClient(apiClientProps).getAlbum({
+                            query: {
+                                id: albumId,
+                            },
+                        }),
+                    );
+                }
+            }
+
+            if (artistIds) {
+                for (const artistId of artistIds) {
+                    artistDetailPromises.push(
+                        ssApiClient(apiClientProps).getArtist({
+                            query: {
+                                id: artistId,
+                            },
+                        }),
+                    );
+                }
+
+                const artistResult = await Promise.all(artistDetailPromises);
+
+                const albums = artistResult.flatMap((artist) => {
+                    if (artist.status !== 200) {
+                        return [];
+                    }
+
+                    return artist.body.artist.album ?? [];
+                });
+
+                const albumIds = albums.map((album) => album.id);
+
+                for (const albumId of albumIds) {
+                    fromAlbumPromises.push(
+                        ssApiClient(apiClientProps).getAlbum({
+                            query: {
+                                id: albumId.toString(),
+                            },
+                        }),
+                    );
+                }
+            }
+
+            let results: z.infer<typeof ssType._response.song>[] = [];
+
+            if (fromAlbumPromises.length > 0) {
+                const albumsResult = await Promise.all(fromAlbumPromises);
+
+                results = albumsResult.flatMap((album) => {
+                    if (album.status !== 200) {
+                        return [];
+                    }
+
+                    return album.body.album.song;
+                });
+            }
+
+            return results.length;
+        }
+
         let totalRecordCount = 0;
 
         // Rather than just do `search3` by groups of 500, instead
@@ -1482,6 +1908,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                     albumOffset: 0,
                     artistCount: 0,
                     artistOffset: 0,
+                    musicFolderId: getLibraryId(query.musicFolderId),
                     query: query.searchTerm || '',
                     songCount: 1,
                     songOffset: sectionIndex,
@@ -1510,6 +1937,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                     albumOffset: 0,
                     artistCount: 0,
                     artistOffset: 0,
+                    musicFolderId: getLibraryId(query.musicFolderId),
                     query: query.searchTerm || '',
                     songCount: MAX_SUBSONIC_ITEMS,
                     songOffset: startIndex,
@@ -1530,26 +1958,102 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         return totalRecordCount;
     },
-    getStreamUrl: ({ apiClientProps: { server }, query }) => {
-        const { bitrate, format, id, transcode } = query;
-        let url = `${server?.url}/rest/stream.view?id=${id}&v=1.13.0&c=Feishin&${server?.credential}`;
+    getStreamUrl: async ({ apiClientProps, query }) => {
+        const { server } = apiClientProps;
+        const { bitrate, format, id, mediaType = 'song', skipAutoTranscode, transcode } = query;
 
+        const streamUrl = `${server?.url}/rest/stream.view?id=${id}&v=1.13.0&c=Feishin&${server?.credential}`;
+
+        // If transcoding is explicitly enabled, just return the direct transcoded stream URL
         if (transcode) {
-            if (format) {
-                url += `&format=${format}`;
-            }
-            if (bitrate !== undefined) {
-                url += `&maxBitRate=${bitrate}`;
-            }
+            return appendTranscodeParams(streamUrl, format, bitrate);
         }
 
-        return url;
+        // Used in cases where MPV is the default player, since mpv handles basically every audio format
+        if (skipAutoTranscode) {
+            return streamUrl;
+        }
+
+        // If the server supports transcoding decision, always use it to determine if we need to transcode
+        if (hasFeature(server, ServerFeature.OS_TRANSCODE_DECISION)) {
+            const maxTranscodingAudioBitrate = 0;
+
+            const directPlayProfiles = getDirectPlayProfiles();
+            const transcodingProfiles = getDefaultTranscodingProfiles();
+
+            const transcodeDecision = await ssApiClient(apiClientProps).getTranscodeDecision({
+                body: {
+                    codecProfiles: [],
+                    directPlayProfiles,
+                    maxAudioBitrate: 0,
+                    maxTranscodingAudioBitrate,
+                    name: 'Feishin',
+                    platform: navigator.userAgent,
+                    transcodingProfiles,
+                },
+                query: {
+                    mediaId: id,
+                    mediaType,
+                },
+            });
+
+            // If the server returns an error for transcodeDecision, fall back to direct stream so that we don't break the player
+            if (transcodeDecision.status !== 200) {
+                logger.error(
+                    `Failed to get transcode decision for song ${id}, falling back to direct stream`,
+                );
+                return streamUrl;
+            }
+
+            const td = transcodeDecision.body.transcodeDecision;
+            const requiresTranscoding = !td?.canDirectPlay;
+
+            // If the server does not require transcoding, just return the direct stream URL
+            if (!requiresTranscoding) {
+                return streamUrl;
+            }
+
+            logger.info(`Song ${id} requires transcoding: ${[td.transcodeReason].join(', ')}`);
+
+            // If the server does not return transcode params, manually create the transcode params
+            if (!td.transcodeParams) {
+                return appendTranscodeParams(streamUrl, format, bitrate);
+            }
+
+            const transcodeStreamUrl = buildGetTranscodeStreamUrl(server, {
+                mediaId: String(id),
+                mediaType: (mediaType ?? 'song') as 'podcast' | 'song',
+                offset: 0,
+                transcodeParams: td.transcodeParams,
+            });
+
+            return transcodeStreamUrl;
+        }
+
+        return streamUrl;
     },
     getStructuredLyrics: async (args) => {
         const { apiClientProps, query } = args;
+        const server = apiClientProps.server;
+        const supportsStructuredLyrics = hasFeatureWithVersion(
+            server,
+            ServerFeature.LYRICS_MULTIPLE_STRUCTURED,
+            1,
+        );
+
+        const supportsEnhancedLyrics = hasFeatureWithVersion(
+            server,
+            ServerFeature.LYRICS_MULTIPLE_STRUCTURED,
+            2,
+        );
+
+        if (!supportsStructuredLyrics && !supportsEnhancedLyrics) {
+            return [];
+        }
 
         const res = await ssApiClient(apiClientProps).getStructuredLyrics({
             query: {
+                enhanced: supportsEnhancedLyrics ? true : undefined,
                 id: query.songId,
             },
         });
@@ -1564,50 +2068,56 @@ export const SubsonicController: InternalControllerEndpoint = {
             return [];
         }
 
-        return lyrics.map((lyric) => {
-            const baseLyric = {
-                artist: lyric.displayArtist || '',
-                lang: lyric.lang,
-                name: lyric.displayTitle || '',
-                remote: false,
-                source: apiClientProps.server?.name || 'music server',
-            };
+        const source = apiClientProps.server?.name || 'music server';
 
-            if (lyric.synced) {
-                return {
-                    ...baseLyric,
-                    lyrics: lyric.line.map((line) => [line.start!, line.value]),
-                    synced: true,
-                };
-            }
-            return {
-                ...baseLyric,
-                lyrics: lyric.line.map((line) => [line.value]).join('\n'),
-                synced: false,
-            };
-        });
+        return lyrics.map((lyric) => mapStructuredLyric(lyric, source));
     },
     getTopSongs: async (args) => {
         const { apiClientProps, query } = args;
 
-        const res = await ssApiClient(apiClientProps).getTopSongsList({
+        const type = query.type === 'personal' ? 'personal' : 'community';
+
+        if (type === 'community') {
+            const res = await ssApiClient(apiClientProps).getTopSongsList({
+                query: {
+                    artist: query.artist,
+                    count: query.limit,
+                },
+            });
+
+            if (res.status !== 200) {
+                throw new Error('Failed to get top songs');
+            }
+
+            return {
+                items: (res.body.topSongs?.song || []).map((song) =>
+                    ssNormalize.song(song, apiClientProps.server),
+                ),
+                startIndex: 0,
+                totalRecordCount: res.body.topSongs?.song?.length || 0,
+            };
+        }
+
+        const res = await SubsonicController.getSongList({
+            apiClientProps,
             query: {
-                artist: query.artist,
-                count: query.limit,
+                artistIds: [query.artistId],
+                sortBy: SongListSort.PLAY_COUNT,
+                sortOrder: SortOrder.DESC,
+                startIndex: 0,
             },
         });
 
-        if (res.status !== 200) {
-            throw new Error('Failed to get top songs');
-        }
+        const songsWithPlayCount = orderBy(
+            res.items.filter((song) => song.playCount > 0),
+            ['playCount', 'albumId', 'trackNumber'],
+            ['desc', 'asc', 'asc'],
+        );
 
         return {
-            items:
-                res.body.topSongs?.song?.map((song) =>
-                    ssNormalize.song(song, apiClientProps.server),
-                ) || [],
+            items: songsWithPlayCount,
             startIndex: 0,
-            totalRecordCount: res.body.topSongs?.song?.length || 0,
+            totalRecordCount: res.totalRecordCount,
         };
     },
     getUserInfo: async (args) => {
@@ -1628,6 +2138,36 @@ export const SubsonicController: InternalControllerEndpoint = {
             isAdmin: Boolean(res.body.user.adminRole),
             name: res.body.user.username,
         };
+    },
+    jukeboxControl: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const res = await ssApiClient(apiClientProps).jukeboxControl({
+            query: {
+                action: query.action,
+                gain: query.gain,
+                id: query.id,
+                index: query.index,
+                offset: query.offset,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to control jukebox');
+        }
+
+        return res.body;
+    },
+    refreshItems: async (args) => {
+        const { apiClientProps } = args;
+
+        const res = await ssApiClient(apiClientProps).startScan({ query: {} });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to start scan');
+        }
+
+        return null;
     },
     removeFromPlaylist: async ({ apiClientProps, query }) => {
         const res = await ssApiClient(apiClientProps).updatePlaylist({
@@ -1728,7 +2268,10 @@ export const SubsonicController: InternalControllerEndpoint = {
         if (hasFeature(apiClientProps.server, ServerFeature.SERVER_PLAY_QUEUE)) {
             const res = await ssApiClient(apiClientProps).savePlayQueueByIndex({
                 query: {
-                    currentIndex: query.currentIndex !== undefined ? query.currentIndex : undefined,
+                    currentIndex:
+                        query.currentIndex !== undefined && query.currentIndex < query.songs.length
+                            ? Math.max(0, query.currentIndex)
+                            : undefined,
                     id: query.songs,
                     position: query.positionMs,
                 },
@@ -1757,15 +2300,64 @@ export const SubsonicController: InternalControllerEndpoint = {
     scrobble: async (args) => {
         const { apiClientProps, query } = args;
 
-        const res = await ssApiClient(apiClientProps).scrobble({
-            query: {
-                id: query.id,
-                submission: query.submission,
-            },
-        });
+        if (query.submission || query.event === 'start') {
+            const res = await ssApiClient(apiClientProps).scrobble({
+                query: {
+                    id: query.id,
+                    submission: query.submission,
+                },
+            });
 
-        if (res.status !== 200) {
-            throw new Error('Failed to scrobble');
+            if (res.status !== 200) {
+                throw new Error('Failed to scrobble');
+            }
+
+            if (query.submission) {
+                return null;
+            }
+        }
+
+        if (hasFeature(apiClientProps.server, ServerFeature.REPORT_PLAYBACK)) {
+            const defaultParams = {
+                ignoreScrobble: true,
+                mediaId: query.id,
+                mediaType: query.mediaType,
+                playbackRate: query.playbackRate,
+                positionMs: Math.round(query.position ?? 0),
+            };
+
+            const reportPlayback = async (state: 'paused' | 'playing' | 'starting' | 'stopped') => {
+                const res = await ssApiClient(apiClientProps).reportPlayback({
+                    query: {
+                        ...defaultParams,
+                        state,
+                    },
+                });
+
+                if (res.status !== 200) {
+                    throw new Error('Failed to report playback');
+                }
+            };
+
+            switch (query.event) {
+                case 'pause':
+                    await reportPlayback('paused');
+                    break;
+                case 'start':
+                    await reportPlayback('starting');
+                    await reportPlayback('playing');
+                    break;
+                case 'stop':
+                    await reportPlayback('stopped');
+                    break;
+                case 'unpause':
+                    await reportPlayback('playing');
+                    break;
+                default:
+                    break;
+            }
+
+            return null;
         }
 
         return null;
@@ -1779,6 +2371,7 @@ export const SubsonicController: InternalControllerEndpoint = {
                 albumOffset: query.albumStartIndex,
                 artistCount: query.albumArtistLimit,
                 artistOffset: query.albumArtistStartIndex,
+                musicFolderId: getLibraryId(query.musicFolderId),
                 query: query.query,
                 songCount: query.songLimit,
                 songOffset: query.songStartIndex,
@@ -1801,6 +2394,22 @@ export const SubsonicController: InternalControllerEndpoint = {
             ),
         };
     },
+    setPlaylistSongs: async (args) => {
+        const { apiClientProps, body } = args;
+
+        const res = await ssApiClient(apiClientProps).createPlaylist({
+            query: {
+                playlistId: body.id,
+                songId: body.songIds,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to update playlist songs');
+        }
+
+        return null;
+    },
     setRating: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -1813,6 +2422,17 @@ export const SubsonicController: InternalControllerEndpoint = {
                     rating: query.rating,
                 },
             });
+        }
+
+        return null;
+    },
+    startLibraryScan: async (args) => {
+        const { apiClientProps } = args;
+
+        const res = await ssApiClient(apiClientProps).startScan({ query: {} });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to start library scan');
         }
 
         return null;

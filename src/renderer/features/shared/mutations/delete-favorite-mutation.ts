@@ -4,6 +4,7 @@ import isElectron from 'is-electron';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '/@/renderer/api';
+import { queryKeys } from '/@/renderer/api/query-keys';
 import { eventEmitter } from '/@/renderer/events/event-emitter';
 import {
     applyFavoriteOptimisticUpdates,
@@ -38,7 +39,7 @@ export const useDeleteFavorite = (args: MutationHookArgs) => {
 
             toast.show({
                 message: _error.message,
-                title: t('error.genericError', { postProcess: 'sentenceCase' }) as string,
+                title: t('error.genericError') as string,
                 type: 'error',
             });
 
@@ -66,6 +67,17 @@ export const useDeleteFavorite = (args: MutationHookArgs) => {
                     variables.apiClientProps.serverId,
                     variables.query.id,
                 );
+            }
+            if (
+                variables.query.type === LibraryItem.SONG ||
+                variables.query.type === LibraryItem.PLAYLIST_SONG ||
+                variables.query.type === LibraryItem.QUEUE_SONG
+            ) {
+                queryClient.invalidateQueries({
+                    queryKey: queryKeys.albumArtists.favoriteSongs(
+                        variables.apiClientProps.serverId,
+                    ),
+                });
             }
         },
         ...options,

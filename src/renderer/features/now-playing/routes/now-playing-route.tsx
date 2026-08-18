@@ -1,36 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 
-import { NowPlayingHeader } from '/@/renderer/features/now-playing/components/now-playing-header';
+import { ItemListHandle } from '/@/renderer/components/item-list/types';
 import { PlayQueue } from '/@/renderer/features/now-playing/components/play-queue';
 import { PlayQueueListControls } from '/@/renderer/features/now-playing/components/play-queue-list-controls';
 import { AnimatedPage } from '/@/renderer/features/shared/components/animated-page';
 import { PageErrorBoundary } from '/@/renderer/features/shared/components/page-error-boundary';
-import { useAppStoreActions } from '/@/renderer/store';
 import { ItemListKey } from '/@/shared/types/types';
 
 const NowPlayingRoute = () => {
     const [search, setSearch] = useState<string | undefined>(undefined);
-    const { setSideBar } = useAppStoreActions();
-
-    useEffect(() => {
-        // On page enter, set rightExpanded to false
-        setSideBar({ rightExpanded: false });
-
-        return () => {
-            // On page exit, set rightExpanded to true
-            setSideBar({ rightExpanded: true });
-        };
-    }, [setSideBar]);
+    const tableRef = useRef<ItemListHandle | null>(null);
 
     return (
         <AnimatedPage>
-            <NowPlayingHeader />
             <PlayQueueListControls
                 handleSearch={setSearch}
                 searchTerm={search}
+                tableRef={tableRef}
                 type={ItemListKey.QUEUE_SONG}
             />
-            <PlayQueue listKey={ItemListKey.QUEUE_SONG} searchTerm={search} />
+            <PlayQueue listKey={ItemListKey.QUEUE_SONG} ref={tableRef} searchTerm={search} />
         </AnimatedPage>
     );
 };

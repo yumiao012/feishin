@@ -13,17 +13,20 @@ import {
     useRadioPlayer,
 } from '/@/renderer/features/radio/hooks/use-radio-player';
 import {
+    useButtonSize,
     usePlayerRepeat,
     usePlayerShuffle,
-    usePlayerSong,
+    usePlayerSongProperties,
     usePlayerStatus,
-    useSettingsStore,
+    useSkipButtons,
 } from '/@/renderer/store';
 import { Icon } from '/@/shared/components/icon/icon';
+import { Stack } from '/@/shared/components/stack/stack';
+import { Text } from '/@/shared/components/text/text';
 import { PlayerRepeat, PlayerShuffle, PlayerStatus } from '/@/shared/types/types';
 
 export const CenterControls = () => {
-    const skip = useSettingsStore((state) => state.general.skipButtons);
+    const skip = useSkipButtons();
 
     const isRadioActive = useIsRadioActive();
 
@@ -85,7 +88,7 @@ const RadioCenterPlayButton = ({ disabled }: { disabled?: boolean }) => {
 
 const RadioStopButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { stop } = useRadioControls();
 
     return (
@@ -94,7 +97,7 @@ const RadioStopButton = ({ disabled }: { disabled?: boolean }) => {
             icon={<Icon fill="default" icon="mediaStop" size={buttonSize - 2} />}
             onClick={stop}
             tooltip={{
-                label: t('player.stop', { postProcess: 'sentenceCase' }),
+                label: t('player.stop'),
                 openDelay: 0,
             }}
             variant="tertiary"
@@ -104,16 +107,16 @@ const RadioStopButton = ({ disabled }: { disabled?: boolean }) => {
 
 const StopButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { mediaStop } = usePlayer();
 
     return (
         <PlayerButton
             disabled={disabled}
             icon={<Icon fill="default" icon="mediaStop" size={buttonSize - 2} />}
-            onClick={mediaStop}
+            onClick={() => mediaStop()}
             tooltip={{
-                label: t('player.stop', { postProcess: 'sentenceCase' }),
+                label: t('player.stop'),
                 openDelay: 0,
             }}
             variant="tertiary"
@@ -123,7 +126,7 @@ const StopButton = ({ disabled }: { disabled?: boolean }) => {
 
 const ShuffleButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const shuffle = usePlayerShuffle();
     const { toggleShuffle } = usePlayer();
 
@@ -132,7 +135,7 @@ const ShuffleButton = ({ disabled }: { disabled?: boolean }) => {
             disabled={disabled}
             icon={
                 <Icon
-                    fill={shuffle === PlayerShuffle.NONE ? 'default' : 'primary'}
+                    color={shuffle === PlayerShuffle.NONE ? 'default' : 'primary'}
                     icon="mediaShuffle"
                     size={buttonSize}
                 />
@@ -144,9 +147,8 @@ const ShuffleButton = ({ disabled }: { disabled?: boolean }) => {
                     shuffle === PlayerShuffle.NONE
                         ? t('player.shuffle', {
                               context: 'off',
-                              postProcess: 'sentenceCase',
                           })
-                        : t('player.shuffle', { postProcess: 'sentenceCase' }),
+                        : t('player.shuffle'),
                 openDelay: 0,
             }}
             variant="tertiary"
@@ -156,16 +158,25 @@ const ShuffleButton = ({ disabled }: { disabled?: boolean }) => {
 
 const PreviousButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { mediaPrevious } = usePlayer();
 
     return (
         <PlayerButton
             disabled={disabled}
             icon={<Icon fill="default" icon="mediaPrevious" size={buttonSize} />}
-            onClick={mediaPrevious}
+            onClick={(e) => mediaPrevious(e.altKey)}
             tooltip={{
-                label: t('player.previous', { postProcess: 'sentenceCase' }),
+                label: (
+                    <Stack gap="xs" justify="center">
+                        <Text fw={500} ta="center">
+                            {t('player.previous')}
+                        </Text>
+                        <Text fw={500} isMuted size="xs" ta="center">
+                            {t('player.previousAlbum')}
+                        </Text>
+                    </Stack>
+                ),
                 openDelay: 0,
             }}
             variant="secondary"
@@ -175,7 +186,7 @@ const PreviousButton = ({ disabled }: { disabled?: boolean }) => {
 
 const SkipBackwardButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { mediaSkipBackward } = usePlayer();
 
     return (
@@ -186,7 +197,6 @@ const SkipBackwardButton = ({ disabled }: { disabled?: boolean }) => {
             tooltip={{
                 label: t('player.skip', {
                     context: 'back',
-                    postProcess: 'sentenceCase',
                 }),
                 openDelay: 0,
             }}
@@ -196,14 +206,15 @@ const SkipBackwardButton = ({ disabled }: { disabled?: boolean }) => {
 };
 
 const CenterPlayButton = ({ disabled }: { disabled?: boolean }) => {
-    const currentSong = usePlayerSong();
+    const { id: currentSongId } = usePlayerSongProperties(['id']) ?? {};
+
     const status = usePlayerStatus();
     const { mediaTogglePlayPause } = usePlayer();
 
     return (
         <MainPlayButton
-            disabled={disabled || currentSong?.id === undefined}
-            isPaused={status === PlayerStatus.PAUSED}
+            disabled={disabled || currentSongId === undefined}
+            isPaused={status !== PlayerStatus.PLAYING}
             onClick={mediaTogglePlayPause}
         />
     );
@@ -211,7 +222,7 @@ const CenterPlayButton = ({ disabled }: { disabled?: boolean }) => {
 
 const SkipForwardButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { mediaSkipForward } = usePlayer();
 
     return (
@@ -222,7 +233,6 @@ const SkipForwardButton = ({ disabled }: { disabled?: boolean }) => {
             tooltip={{
                 label: t('player.skip', {
                     context: 'forward',
-                    postProcess: 'sentenceCase',
                 }),
                 openDelay: 0,
             }}
@@ -233,16 +243,25 @@ const SkipForwardButton = ({ disabled }: { disabled?: boolean }) => {
 
 const NextButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const { mediaNext } = usePlayer();
 
     return (
         <PlayerButton
             disabled={disabled}
             icon={<Icon fill="default" icon="mediaNext" size={buttonSize} />}
-            onClick={mediaNext}
+            onClick={(e) => mediaNext(e.altKey)}
             tooltip={{
-                label: t('player.next', { postProcess: 'sentenceCase' }),
+                label: (
+                    <Stack gap="xs" justify="center">
+                        <Text fw={500} ta="center">
+                            {t('player.next')}
+                        </Text>
+                        <Text fw={500} isMuted size="xs" ta="center">
+                            {t('player.nextAlbum')}
+                        </Text>
+                    </Stack>
+                ),
                 openDelay: 0,
             }}
             variant="secondary"
@@ -252,7 +271,7 @@ const NextButton = ({ disabled }: { disabled?: boolean }) => {
 
 const RepeatButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
     const repeat = usePlayerRepeat();
     const { toggleRepeat } = usePlayer();
 
@@ -277,16 +296,13 @@ const RepeatButton = ({ disabled }: { disabled?: boolean }) => {
                     repeat === PlayerRepeat.NONE
                         ? t('player.repeat', {
                               context: 'off',
-                              postProcess: 'sentenceCase',
                           })
                         : repeat === PlayerRepeat.ALL
                           ? t('player.repeat', {
                                 context: 'all',
-                                postProcess: 'sentenceCase',
                             })
                           : t('player.repeat', {
                                 context: 'one',
-                                postProcess: 'sentenceCase',
                             })
                 }`,
                 openDelay: 0,
@@ -298,7 +314,7 @@ const RepeatButton = ({ disabled }: { disabled?: boolean }) => {
 
 const ShuffleAllButton = ({ disabled }: { disabled?: boolean }) => {
     const { t } = useTranslation();
-    const buttonSize = useSettingsStore((state) => state.general.buttonSize);
+    const buttonSize = useButtonSize();
 
     return (
         <PlayerButton
@@ -306,7 +322,7 @@ const ShuffleAllButton = ({ disabled }: { disabled?: boolean }) => {
             icon={<Icon fill="default" icon="mediaRandom" size={buttonSize} />}
             onClick={() => openShuffleAllModal()}
             tooltip={{
-                label: t('form.shuffleAll.title', { postProcess: 'sentenceCase' }),
+                label: t('form.shuffleAll.title'),
                 openDelay: 0,
             }}
             variant="tertiary"

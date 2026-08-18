@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import throttle from 'lodash/throttle';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { useOverlayScrollbars } from 'overlayscrollbars-react';
 import React, {
     CSSProperties,
@@ -31,21 +31,18 @@ import {
     ItemCard,
     ItemCardProps,
 } from '/@/renderer/components/item-card/item-card';
-import { ExpandedListContainer } from '/@/renderer/components/item-list/expanded-list-container';
-import { ExpandedListItem } from '/@/renderer/components/item-list/expanded-list-item';
 import { createExtractRowId } from '/@/renderer/components/item-list/helpers/extract-row-id';
 import { useDefaultItemListControls } from '/@/renderer/components/item-list/helpers/item-list-controls';
 import {
     ItemListStateActions,
     ItemListStateItemWithRequiredProperties,
     useItemListState,
-    useItemListStateSubscription,
 } from '/@/renderer/components/item-list/helpers/item-list-state';
+import { useListHotkeys } from '/@/renderer/components/item-list/helpers/use-list-hotkeys';
 import { ItemControls, ItemListHandle } from '/@/renderer/components/item-list/types';
 import { animationProps } from '/@/shared/components/animations/animation-props';
 import { useElementSize } from '/@/shared/hooks/use-element-size';
 import { useFocusWithin } from '/@/shared/hooks/use-focus-within';
-import { useHotkeys } from '/@/shared/hooks/use-hotkeys';
 import { useMergedRef } from '/@/shared/hooks/use-merged-ref';
 import { LibraryItem } from '/@/shared/types/domain-types';
 
@@ -53,14 +50,17 @@ interface VirtualizedGridListProps {
     _tableMetaVersion: number; // Used to trigger rerenders via React.memo comparison
     controls: ItemControls;
     currentPage?: number;
-    data: unknown[];
+    dataVersion?: number;
     enableDrag?: boolean;
     enableExpansion: boolean;
+    enableMultiSelect: boolean;
     enableSelection: boolean;
     gap: 'lg' | 'md' | 'sm' | 'xl' | 'xs';
+    getItem?: (index: number) => ItemCardProps['data'];
     height: number;
     initialTop?: ItemGridListProps['initialTop'];
     internalState: ItemListStateActions;
+    itemCount: number;
     itemType: LibraryItem;
     onRangeChanged?: ItemGridListProps['onRangeChanged'];
     onScroll?: ItemGridListProps['onScroll'];
@@ -81,14 +81,17 @@ const VirtualizedGridList = React.memo(
     ({
         controls,
         currentPage,
-        data,
+        dataVersion,
         enableDrag,
         enableExpansion,
+        enableMultiSelect,
         enableSelection,
         gap,
+        getItem,
         height,
         initialTop,
         internalState,
+        itemCount,
         itemType,
         onRangeChanged,
         onScroll,
@@ -102,17 +105,22 @@ const VirtualizedGridList = React.memo(
     }: VirtualizedGridListProps) => {
         const tableMeta = tableMetaRef.current;
         const scrollEndTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+        const isInitialScrollRef = useRef(true);
+        const initialScrollOffsetRef = useRef<null | number>(null);
 
         const itemData: GridItemProps = useMemo(() => {
             return {
                 columns: tableMeta?.columnCount || 0,
                 controls,
-                data,
+                dataVersion,
                 enableDrag,
                 enableExpansion,
+                enableMultiSelect,
                 enableSelection,
                 gap,
+                getItem,
                 internalState,
+                itemCount,
                 itemType,
                 rows,
                 size,
@@ -122,9 +130,12 @@ const VirtualizedGridList = React.memo(
             tableMeta,
             controls,
             rows,
-            data,
+            getItem,
+            itemCount,
+            dataVersion,
             enableDrag,
             enableExpansion,
+            enableMultiSelect,
             enableSelection,
             gap,
             internalState,
@@ -135,6 +146,16 @@ const VirtualizedGridList = React.memo(
         const handleOnScroll = useCallback(
             ({ scrollDirection, scrollOffset }: ListOnScrollProps) => {
                 onScroll?.(scrollOffset, scrollDirection === 'forward' ? 'down' : 'up');
+
+                if (isInitialScrollRef.current) {
+                    if (initialScrollOffsetRef.current === null) {
+                        initialScrollOffsetRef.current = scrollOffset;
+                        return;
+                    } else if (Math.abs(initialScrollOffsetRef.current - scrollOffset) < 1) {
+                        return;
+                    }
+                    isInitialScrollRef.current = false;
+                }
 
                 if (scrollEndTimeoutRef.current) {
                     clearTimeout(scrollEndTimeoutRef.current);
@@ -166,6 +187,11 @@ const VirtualizedGridList = React.memo(
             },
             [onRangeChanged, tableMetaRef],
         );
+
+        useEffect(() => {
+            isInitialScrollRef.current = true;
+            initialScrollOffsetRef.current = null;
+        }, [initialTop]);
 
         if (!tableMeta) {
             return null;
@@ -236,11 +262,11 @@ const createThrottledSetTableMeta = (
         let dynamicItemsPerRow = 2;
 
         if (is4xl) {
-            dynamicItemsPerRow = 12;
-        } else if (is3xl) {
             dynamicItemsPerRow = 10;
-        } else if (is2xl) {
+        } else if (is3xl) {
             dynamicItemsPerRow = 8;
+        } else if (is2xl) {
+            dynamicItemsPerRow = 7;
         } else if (isXl) {
             dynamicItemsPerRow = 6;
         } else if (isLg) {
@@ -285,12 +311,15 @@ const createThrottledSetTableMeta = (
 export interface GridItemProps {
     columns: number;
     controls: ItemCardProps['controls'];
-    data: any[];
+    dataVersion?: number;
     enableDrag?: boolean;
     enableExpansion?: boolean;
+    enableMultiSelect: boolean;
     enableSelection?: boolean;
     gap: 'lg' | 'md' | 'sm' | 'xl' | 'xs';
+    getItem?: (index: number) => ItemCardProps['data'];
     internalState: ItemListStateActions;
+    itemCount: number;
     itemType: LibraryItem;
     rows?: ItemCardProps['rows'];
     size?: 'compact' | 'default' | 'large';
@@ -304,16 +333,23 @@ export interface GridItemProps {
 export interface ItemGridListProps {
     currentPage?: number;
     data: unknown[];
+    dataVersion?: number;
     enableDrag?: boolean;
+    enableEntranceAnimation?: boolean;
     enableExpansion?: boolean;
+    enableMultiSelect?: boolean;
     enableSelection?: boolean;
     enableSelectionDialog?: boolean;
     gap?: 'lg' | 'md' | 'sm' | 'xl' | 'xs';
+    getItem?: (index: number) => ItemCardProps['data'];
+    getItemIndex?: (rowId: string) => number | undefined;
+    getLoadedItems?: () => unknown[];
     getRowId?: ((item: unknown) => string) | string;
     initialTop?: {
         to: number;
         type: 'index' | 'offset';
     };
+    itemCount?: number;
     itemsPerRow?: number;
     itemType: LibraryItem;
     onRangeChanged?: (range: { startIndex: number; stopIndex: number }) => void;
@@ -328,12 +364,19 @@ export interface ItemGridListProps {
 const BaseItemGridList = ({
     currentPage,
     data,
+    dataVersion,
     enableDrag = true,
+    enableEntranceAnimation = true,
     enableExpansion = false,
+    enableMultiSelect = false,
     enableSelection = true,
     gap = 'sm',
+    getItem,
+    getItemIndex,
+    getLoadedItems,
     getRowId,
     initialTop,
+    itemCount,
     itemsPerRow,
     itemType,
     onRangeChanged,
@@ -344,17 +387,34 @@ const BaseItemGridList = ({
     rows,
     size = 'default',
 }: ItemGridListProps) => {
-    const rootRef = useRef(null);
-    const outerRef = useRef(null);
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const outerRef = useRef<HTMLDivElement | null>(null);
     const listRef = useRef<FixedSizeList<GridItemProps>>(null);
     const { ref: containerRef, width: containerWidth } = useElementSize();
     const { focused, ref: containerFocusRef } = useFocusWithin();
     const handleRef = useRef<ItemListHandle | null>(null);
     const mergedContainerRef = useMergedRef(containerRef, rootRef, containerFocusRef);
 
+    const resolvedItemCount = itemCount ?? data.length;
+    const resolvedGetItem = useCallback<(index: number) => ItemCardProps['data']>(
+        (index: number) => {
+            return (getItem ? getItem(index) : (data as any[])[index]) as ItemCardProps['data'];
+        },
+        [data, getItem],
+    );
+
+    const dataRef = useRef(data);
+    const getLoadedItemsRef = useRef(getLoadedItems);
+    dataRef.current = data;
+    getLoadedItemsRef.current = getLoadedItems;
+
     const getDataFn = useCallback(() => {
-        return data;
-    }, [data]);
+        const loadedItems = getLoadedItemsRef.current?.();
+        if (loadedItems?.length) {
+            return loadedItems;
+        }
+        return dataRef.current ?? [];
+    }, []);
 
     const extractRowId = useMemo(() => createExtractRowId(getRowId), [getRowId]);
 
@@ -437,10 +497,10 @@ const BaseItemGridList = ({
     }, [itemsPerRow, rows?.length, size]);
 
     useLayoutEffect(() => {
-        const { current: container } = containerRef;
+        const container = rootRef.current;
         if (!container) return;
 
-        throttledSetTableMeta(containerWidth, data.length, (meta) => {
+        throttledSetTableMeta(containerWidth, resolvedItemCount, (meta) => {
             if (!meta) return;
 
             const current = tableMetaRef.current;
@@ -451,15 +511,20 @@ const BaseItemGridList = ({
                 current.rowCount !== meta.rowCount
             ) {
                 tableMetaRef.current = meta;
-                container.style.setProperty('--grid-column-count', String(meta.columnCount));
-                container.style.setProperty('--grid-item-height', `${meta.itemHeight}px`);
-                container.style.setProperty('--grid-row-count', String(meta.rowCount));
+                const el = rootRef.current;
+                if (!el) return;
+                el.style.setProperty('--grid-column-count', String(meta.columnCount));
+                el.style.setProperty('--grid-item-height', `${meta.itemHeight}px`);
+                el.style.setProperty('--grid-row-count', String(meta.rowCount));
                 setTableMetaVersion((v) => v + 1);
             }
         });
-    }, [containerWidth, data.length, throttledSetTableMeta, containerRef]);
+    }, [containerWidth, resolvedItemCount, throttledSetTableMeta]);
 
-    const controls = useDefaultItemListControls({ overrides: overrideControls });
+    const controls = useDefaultItemListControls({
+        enableMultiSelect,
+        overrides: overrideControls,
+    });
 
     const scrollToIndex = useCallback(
         (
@@ -510,10 +575,12 @@ const BaseItemGridList = ({
                 const lastSelected = selected[selected.length - 1];
                 const lastRowId = internalState.extractRowId(lastSelected);
                 if (lastRowId) {
-                    currentIndex = data.findIndex((d: any) => {
-                        const rowId = internalState.extractRowId(d);
-                        return rowId === lastRowId;
-                    });
+                    currentIndex =
+                        getItemIndex?.(lastRowId) ??
+                        data.findIndex((d: any) => {
+                            const rowId = internalState.extractRowId(d);
+                            return rowId === lastRowId;
+                        });
                 }
             }
 
@@ -524,7 +591,7 @@ const BaseItemGridList = ({
                     : 0;
             const currentCol =
                 currentIndex !== -1 ? currentIndex % tableMetaRef.current.columnCount : 0;
-            const totalRows = Math.ceil(data.length / tableMetaRef.current.columnCount);
+            const totalRows = Math.ceil(resolvedItemCount / tableMetaRef.current.columnCount);
 
             let newIndex = 0;
             if (currentIndex !== -1) {
@@ -536,7 +603,7 @@ const BaseItemGridList = ({
                             const nextRowStart = nextRow * tableMetaRef.current.columnCount;
                             const nextRowEnd = Math.min(
                                 nextRowStart + tableMetaRef.current.columnCount - 1,
-                                data.length - 1,
+                                resolvedItemCount - 1,
                             );
                             // Keep same column position, or use last item in row if column doesn't exist
                             newIndex = Math.min(nextRowStart + currentCol, nextRowEnd);
@@ -557,7 +624,7 @@ const BaseItemGridList = ({
                                     1,
                                 0,
                             );
-                            newIndex = Math.min(newIndex, data.length - 1);
+                            newIndex = Math.min(newIndex, resolvedItemCount - 1);
                         } else {
                             newIndex = currentIndex;
                         }
@@ -567,14 +634,14 @@ const BaseItemGridList = ({
                         // Move right, wrap to next row if at end of row
                         if (
                             currentCol < tableMetaRef.current.columnCount - 1 &&
-                            currentIndex < data.length - 1
+                            currentIndex < resolvedItemCount - 1
                         ) {
                             newIndex = currentIndex + 1;
                         } else if (currentRow < totalRows - 1) {
                             // Wrap to start of next row
                             newIndex = Math.min(
                                 (currentRow + 1) * tableMetaRef.current.columnCount,
-                                data.length - 1,
+                                resolvedItemCount - 1,
                             );
                         } else {
                             newIndex = currentIndex;
@@ -588,7 +655,7 @@ const BaseItemGridList = ({
                             const prevRowStart = prevRow * tableMetaRef.current.columnCount;
                             const prevRowEnd = Math.min(
                                 prevRowStart + tableMetaRef.current.columnCount - 1,
-                                data.length - 1,
+                                resolvedItemCount - 1,
                             );
                             // Keep same column position, or use last item in row if column doesn't exist
                             newIndex = Math.min(prevRowStart + currentCol, prevRowEnd);
@@ -603,7 +670,7 @@ const BaseItemGridList = ({
                 newIndex = 0;
             }
 
-            const newItem: any = data[newIndex];
+            const newItem: any = resolvedGetItem(newIndex);
             if (!newItem) return;
 
             // Handle Shift + Arrow for incremental range selection (matches shift+click behavior)
@@ -616,10 +683,12 @@ const BaseItemGridList = ({
                     const lastRowId = internalState.extractRowId(lastSelectedItem);
                     if (!lastRowId) return;
 
-                    const lastIndex = data.findIndex((d: any) => {
-                        const rowId = internalState.extractRowId(d);
-                        return rowId === lastRowId;
-                    });
+                    const lastIndex =
+                        getItemIndex?.(lastRowId) ??
+                        data.findIndex((d: any) => {
+                            const rowId = internalState.extractRowId(d);
+                            return rowId === lastRowId;
+                        });
 
                     if (lastIndex !== -1 && newIndex !== -1) {
                         // Create range selection from last selected to new position
@@ -628,7 +697,7 @@ const BaseItemGridList = ({
 
                         const rangeItems: ItemListStateItemWithRequiredProperties[] = [];
                         for (let i = startIndex; i <= stopIndex; i++) {
-                            const rangeItem = data[i];
+                            const rangeItem = resolvedGetItem(i);
                             if (
                                 rangeItem &&
                                 typeof rangeItem === 'object' &&
@@ -693,7 +762,15 @@ const BaseItemGridList = ({
 
             scrollToIndex(newIndex);
         },
-        [data, enableSelection, internalState, scrollToIndex],
+        [
+            data,
+            enableSelection,
+            getItemIndex,
+            internalState,
+            resolvedGetItem,
+            resolvedItemCount,
+            scrollToIndex,
+        ],
     );
 
     const imperativeHandle: ItemListHandle = useMemo(() => {
@@ -714,20 +791,13 @@ const BaseItemGridList = ({
 
     useImperativeHandle(ref, () => imperativeHandle, [imperativeHandle]);
 
-    useHotkeys([
-        [
-            'mod+a',
-            () => {
-                if (focused) {
-                    if (internalState.isAllSelected()) {
-                        internalState.deselectAll();
-                    } else {
-                        internalState.selectAll();
-                    }
-                }
-            },
-        ],
-    ]);
+    useListHotkeys({
+        controls,
+        focusContainerRef: rootRef,
+        focused,
+        internalState,
+        itemType,
+    });
 
     return (
         <motion.div
@@ -738,7 +808,7 @@ const BaseItemGridList = ({
             ref={mergedContainerRef}
             tabIndex={0}
             {...animationProps.fadeIn}
-            transition={{ duration: 1, ease: 'anticipate' }}
+            transition={{ duration: enableEntranceAnimation ? 0.5 : 0, ease: 'anticipate' }}
         >
             <AutoSizer>
                 {({ height, width }) => (
@@ -746,14 +816,17 @@ const BaseItemGridList = ({
                         _tableMetaVersion={tableMetaVersion}
                         controls={controls}
                         currentPage={currentPage}
-                        data={data}
+                        dataVersion={dataVersion}
                         enableDrag={enableDrag}
                         enableExpansion={enableExpansion}
+                        enableMultiSelect={enableMultiSelect}
                         enableSelection={enableSelection}
                         gap={gap}
+                        getItem={resolvedGetItem}
                         height={height}
                         initialTop={initialTop}
                         internalState={internalState}
+                        itemCount={resolvedItemCount}
                         itemType={itemType}
                         onRangeChanged={onRangeChanged}
                         onScroll={onScroll ?? (() => {})}
@@ -767,20 +840,26 @@ const BaseItemGridList = ({
                     />
                 )}
             </AutoSizer>
-            <AnimatePresence presenceAffectsLayout>
-                <ExpandedContainer internalState={internalState} itemType={itemType} />
-                {/* {enableSelectionDialog && <SelectionDialog internalState={internalState} />} */}
-            </AnimatePresence>
         </motion.div>
     );
 };
 
 const ListComponent = memo((props: ListChildComponentProps<GridItemProps>) => {
     const { index, style } = props;
-    const { columns, controls, data, enableDrag, gap, itemType, rows, size } = props.data;
+    const {
+        columns,
+        controls,
+        enableDrag,
+        enableMultiSelect,
+        gap,
+        getItem,
+        itemCount,
+        itemType,
+        rows,
+        size,
+    } = props.data;
 
     const items: ReactNode[] = [];
-    const itemCount = data.length;
     const startIndex = index * columns;
     const stopIndex = Math.min(itemCount - 1, startIndex + columns - 1);
 
@@ -793,7 +872,8 @@ const ListComponent = memo((props: ListChildComponentProps<GridItemProps>) => {
     }
 
     for (let i = startIndex; i <= stopIndex + columnCountToAdd; i += 1) {
-        if (i < data.length) {
+        if (i < itemCount) {
+            const item = getItem ? getItem(i) : undefined;
             items.push(
                 <div
                     className={clsx(styles.itemRow, styles[`gap-${gap}`])}
@@ -802,9 +882,11 @@ const ListComponent = memo((props: ListChildComponentProps<GridItemProps>) => {
                 >
                     <ItemCard
                         controls={controls}
-                        data={data[i]}
+                        data={item}
                         enableDrag={enableDrag}
                         enableExpansion={props.data.enableExpansion}
+                        enableMultiSelect={enableMultiSelect}
+                        imageAsLink={!enableMultiSelect}
                         internalState={props.data.internalState}
                         itemType={itemType}
                         rows={rows}
@@ -828,25 +910,3 @@ const ListComponent = memo((props: ListChildComponentProps<GridItemProps>) => {
 export const ItemGridList = memo(BaseItemGridList);
 
 ItemGridList.displayName = 'ItemGridList';
-
-const ExpandedContainer = ({
-    internalState,
-    itemType,
-}: {
-    internalState: ItemListStateActions;
-    itemType: LibraryItem;
-}) => {
-    const hasExpanded = useItemListStateSubscription(internalState, (state) =>
-        state ? state.expanded.size > 0 : false,
-    );
-
-    return (
-        <AnimatePresence initial={false}>
-            {hasExpanded && (
-                <ExpandedListContainer>
-                    <ExpandedListItem internalState={internalState} itemType={itemType} />
-                </ExpandedListContainer>
-            )}
-        </AnimatePresence>
-    );
-};

@@ -1,4 +1,5 @@
 import isElectron from 'is-electron';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -20,7 +21,7 @@ const WINDOW_BAR_OPTIONS = [
 
 const localSettings = isElectron() ? window.api.localSettings : null;
 
-export const WindowSettings = () => {
+export const WindowSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useWindowSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -35,13 +36,12 @@ export const WindowSettings = () => {
                         if (!e) return;
 
                         // Platform.LINUX is used as the native frame option regardless of the actual platform
-                        const hasFrame = localSettings?.get('window_has_frame') as
-                            | boolean
-                            | undefined;
-                        const isSwitchingToFrame = !hasFrame && e === Platform.LINUX;
-                        const isSwitchingToNoFrame = hasFrame && e !== Platform.LINUX;
-
-                        const requireRestart = isSwitchingToFrame || isSwitchingToNoFrame;
+                        const previousWindowBarStyle = settings.windowBarStyle;
+                        const isSwitchingToNative =
+                            previousWindowBarStyle !== Platform.LINUX && e === Platform.LINUX;
+                        const isSwitchingFromNative =
+                            previousWindowBarStyle === Platform.LINUX && e !== Platform.LINUX;
+                        const requireRestart = isSwitchingToNative || isSwitchingFromNative;
 
                         if (requireRestart) {
                             openRestartRequiredToast();
@@ -50,7 +50,6 @@ export const WindowSettings = () => {
                         localSettings?.set('window_window_bar_style', e as Platform);
                         setSettings({
                             window: {
-                                ...settings,
                                 windowBarStyle: e as Platform,
                             },
                         });
@@ -60,10 +59,33 @@ export const WindowSettings = () => {
             ),
             description: t('setting.windowBarStyle', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.windowBarStyle', { postProcess: 'sentenceCase' }),
+            title: t('setting.windowBarStyle'),
+        },
+        {
+            control: (
+                <Switch
+                    aria-label="Toggle track info in Window Bar"
+                    defaultChecked={settings.windowBarTrackinfo}
+                    onChange={(e) => {
+                        if (!e) return;
+                        setSettings({
+                            window: {
+                                windowBarTrackinfo: e.currentTarget.checked,
+                            },
+                        });
+                    }}
+                />
+            ),
+            description: t('setting.windowBarTrackinfo', {
+                context: 'description',
+            }),
+            // tab is hidden entirely right now
+            // but if it was shown we would want to show this option
+            // as it also controls the tab title in web
+            isHidden: false,
+            title: t('setting.windowBarTrackinfo'),
         },
         {
             control: (
@@ -77,7 +99,6 @@ export const WindowSettings = () => {
                         if (e.currentTarget.checked) {
                             setSettings({
                                 window: {
-                                    ...settings,
                                     tray: true,
                                 },
                             });
@@ -88,7 +109,6 @@ export const WindowSettings = () => {
 
                             setSettings({
                                 window: {
-                                    ...settings,
                                     exitToTray: false,
                                     minimizeToTray: false,
                                     startMinimized: false,
@@ -101,13 +121,10 @@ export const WindowSettings = () => {
             ),
             description: t('setting.trayEnabled', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            note: t('common.restartRequired', {
-                postProcess: 'sentenceCase',
-            }),
-            title: t('setting.trayEnabled', { postProcess: 'sentenceCase' }),
+            note: t('common.restartRequired'),
+            title: t('setting.trayEnabled'),
         },
         {
             control: (
@@ -120,7 +137,6 @@ export const WindowSettings = () => {
                         localSettings?.set('window_minimize_to_tray', e.currentTarget.checked);
                         setSettings({
                             window: {
-                                ...settings,
                                 minimizeToTray: e.currentTarget.checked,
                             },
                         });
@@ -129,10 +145,9 @@ export const WindowSettings = () => {
             ),
             description: t('setting.minimizeToTray', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron() || !settings.tray,
-            title: t('setting.minimizeToTray', { postProcess: 'sentenceCase' }),
+            title: t('setting.minimizeToTray'),
         },
         {
             control: (
@@ -145,7 +160,6 @@ export const WindowSettings = () => {
                         localSettings?.set('window_exit_to_tray', e.currentTarget.checked);
                         setSettings({
                             window: {
-                                ...settings,
                                 exitToTray: e.currentTarget.checked,
                             },
                         });
@@ -154,10 +168,9 @@ export const WindowSettings = () => {
             ),
             description: t('setting.exitToTray', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron() || !settings.tray,
-            title: t('setting.exitToTray', { postProcess: 'sentenceCase' }),
+            title: t('setting.exitToTray'),
         },
         {
             control: (
@@ -170,7 +183,6 @@ export const WindowSettings = () => {
                         localSettings?.set('window_start_minimized', e.currentTarget.checked);
                         setSettings({
                             window: {
-                                ...settings,
                                 startMinimized: e.currentTarget.checked,
                             },
                         });
@@ -179,17 +191,16 @@ export const WindowSettings = () => {
             ),
             description: t('setting.startMinimized', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron() || !settings.tray,
-            title: t('setting.startMinimized', { postProcess: 'sentenceCase' }),
+            title: t('setting.startMinimized'),
         },
         {
             control: (
                 <Switch
                     aria-label="Toggle prevent sleep on playback"
                     defaultChecked={settings.preventSleepOnPlayback}
-                    disabled={!isElectron()}
+                    disabled={!isElectron() || settings.preventSuspendOnPlayback}
                     onChange={(e) => {
                         if (!e) return;
                         localSettings?.set(
@@ -198,7 +209,6 @@ export const WindowSettings = () => {
                         );
                         setSettings({
                             window: {
-                                ...settings,
                                 preventSleepOnPlayback: e.currentTarget.checked,
                             },
                         });
@@ -207,17 +217,38 @@ export const WindowSettings = () => {
             ),
             description: t('setting.preventSleepOnPlayback', {
                 context: 'description',
+            }),
+            isHidden: !isElectron(),
+            title: t('setting.preventSleepOnPlayback'),
+        },
+        {
+            control: (
+                <Switch
+                    aria-label="Toggle prevent suspend on playback"
+                    defaultChecked={settings.preventSuspendOnPlayback}
+                    disabled={!isElectron() || settings.preventSleepOnPlayback}
+                    onChange={(e) => {
+                        if (!e) return;
+                        localSettings?.set(
+                            'window_prevent_suspend_on_playback',
+                            e.currentTarget.checked,
+                        );
+                        setSettings({
+                            window: {
+                                preventSuspendOnPlayback: e.currentTarget.checked,
+                            },
+                        });
+                    }}
+                />
+            ),
+            description: t('setting.preventSuspendOnPlayback', {
+                context: 'description',
                 postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.preventSleepOnPlayback', { postProcess: 'sentenceCase' }),
+            title: t('setting.preventSuspendOnPlayback', { postProcess: 'sentenceCase' }),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={windowOptions}
-            title={t('page.setting.application', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={windowOptions} title={t('page.setting.application')} />;
+});

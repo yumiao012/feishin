@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { useLocation, useParams } from 'react-router';
+import { useParams } from 'react-router';
 
 import { useItemImageUrl } from '/@/renderer/components/item-image/item-image';
 import { NativeScrollArea } from '/@/renderer/components/native-scroll-area/native-scroll-area';
@@ -15,59 +15,46 @@ import {
 import { LibraryContainer } from '/@/renderer/features/shared/components/library-container';
 import { LibraryHeaderBar } from '/@/renderer/features/shared/components/library-header-bar';
 import { PageErrorBoundary } from '/@/renderer/features/shared/components/page-error-boundary';
-import { useFastAverageColor, useWaitForColorCalculation } from '/@/renderer/hooks';
-import { useCurrentServer, useGeneralSettings } from '/@/renderer/store';
+import { useFastAverageColor } from '/@/renderer/hooks';
+import { useAlbumBackground, useCurrentServerId } from '/@/renderer/store';
 import { LibraryItem } from '/@/shared/types/domain-types';
+
+const ALBUM_DETAIL_BG_FALLBACK = 'var(--theme-colors-foreground-muted)';
 
 const AlbumDetailRoute = () => {
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const headerRef = useRef<HTMLDivElement>(null);
-    const { albumBackground, albumBackgroundBlur } = useGeneralSettings();
+    const { albumBackground, albumBackgroundBlur } = useAlbumBackground();
 
     const { albumId } = useParams() as { albumId: string };
-    const server = useCurrentServer();
+    const serverId = useCurrentServerId();
 
-    const location = useLocation();
-
-    const detailQuery = useQuery({
-        ...albumQueries.detail({ query: { id: albumId }, serverId: server?.id }),
-        initialData: location.state?.item,
-        staleTime: 0,
+    const detailQuery = useSuspenseQuery({
+        ...albumQueries.detail({ query: { id: albumId }, serverId }),
     });
 
     const imageUrl =
         useItemImageUrl({
-            id: albumId,
+            id: detailQuery?.data?.imageId || undefined,
             itemType: LibraryItem.ALBUM,
             type: 'itemCard',
         }) || '';
 
-    const { background: backgroundColor, isLoading: isColorLoading } = useFastAverageColor({
+    const { background: backgroundColor } = useFastAverageColor({
         id: albumId,
         src: imageUrl,
-        srcLoaded: !detailQuery.isLoading,
+        srcLoaded: true,
     });
 
-    const background = backgroundColor;
+    const background = backgroundColor ?? ALBUM_DETAIL_BG_FALLBACK;
 
     const showBlurredImage = albumBackground;
-
-    const { isReady } = useWaitForColorCalculation({
-        hasImage: !!imageUrl,
-        isLoading: isColorLoading,
-        routeId: albumId,
-        showBlurredImage,
-    });
-
-    if (!isReady) {
-        return null;
-    }
 
     return (
         <AnimatedPage key={`album-detail-${albumId}`}>
             <NativeScrollArea
                 pageHeaderProps={{
-                    backgroundColor: backgroundColor || undefined,
+                    backgroundColor: backgroundColor ?? ALBUM_DETAIL_BG_FALLBACK,
                     children: (
                         <LibraryHeaderBar>
                             <LibraryHeaderBar.PlayButton
@@ -75,9 +62,7 @@ const AlbumDetailRoute = () => {
                                 itemType={LibraryItem.ALBUM}
                                 variant="default"
                             />
-                            <LibraryHeaderBar.Title>
-                                {detailQuery?.data?.name}
-                            </LibraryHeaderBar.Title>
+                            <LibraryHeaderBar.Title>{detailQuery.data.name}</LibraryHeaderBar.Title>
                         </LibraryHeaderBar>
                     ),
                     offset: 200,

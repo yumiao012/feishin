@@ -6,7 +6,11 @@ import { generatePath, Link } from 'react-router';
 import { SongPath } from '/@/renderer/features/item-details/components/song-path';
 import { AppRoute } from '/@/renderer/router/routes';
 import { formatDurationString, formatSizeString } from '/@/renderer/utils';
-import { formatDateRelative, formatRating } from '/@/renderer/utils/format';
+import {
+    formatDateRelative,
+    formatPartialIsoDateUTC,
+    formatRating,
+} from '/@/renderer/utils/format';
 import { replaceURLWithHTMLLinks } from '/@/renderer/utils/linkify';
 import { normalizeReleaseTypes } from '/@/renderer/utils/normalize-release-types';
 import { sanitize } from '/@/renderer/utils/sanitize';
@@ -36,6 +40,7 @@ export type ItemDetailsModalProps = {
 };
 
 type ItemDetailRow<T> = {
+    count?: number;
     key?: keyof T;
     label: string;
     postprocess?: string[];
@@ -61,7 +66,10 @@ const handleRow = <T extends AnyLibraryItem>(
     return (
         <Table.Tr key={rule.label}>
             <Table.Th>
-                {t(rule.label, { postProcess: rule.postprocess || 'sentenceCase' })}
+                {t(rule.label, {
+                    ...(rule.count !== undefined && { count: rule.count }),
+                    postProcess: rule.postprocess || 'sentenceCase',
+                })}
             </Table.Th>
             <Table.Td>{value}</Table.Td>
         </Table.Tr>
@@ -135,12 +143,12 @@ const BoolField = (key: boolean) =>
 
 const AlbumPropertyMapping: ItemDetailRow<Album>[] = [
     { key: 'name', label: 'common.title' },
-    { label: 'entity.albumArtist_one', render: (item) => formatArtists(item.albumArtists) },
+    { count: 1, label: 'entity.albumArtist', render: (item) => formatArtists(item.albumArtists) },
     {
         label: 'common.releaseType',
         render: (item, t) => normalizeReleaseTypes(item.releaseTypes, t).join(SEPARATOR_STRING),
     },
-    { label: 'entity.genre_other', render: FormatGenre },
+    { count: 2, label: 'entity.genre', render: FormatGenre },
     {
         label: 'common.duration',
         render: (album) => album.duration && formatDurationString(album.duration),
@@ -151,9 +159,9 @@ const AlbumPropertyMapping: ItemDetailRow<Album>[] = [
         label: 'filter.explicitStatus',
         render: (album, t) =>
             album.explicitStatus === ExplicitStatus.EXPLICIT
-                ? t('common.explicit', { postProcess: 'sentenceCase' })
+                ? t('common.explicit')
                 : album.explicitStatus === ExplicitStatus.CLEAN
-                  ? t('common.clean', { postProcess: 'sentenceCase' })
+                  ? t('common.clean')
                   : null,
     },
     { label: 'filter.isCompilation', render: (album) => BoolField(album.isCompilation || false) },
@@ -198,7 +206,7 @@ const AlbumPropertyMapping: ItemDetailRow<Album>[] = [
 
 const AlbumArtistPropertyMapping: ItemDetailRow<AlbumArtist>[] = [
     { key: 'name', label: 'common.name' },
-    { label: 'entity.genre_other', render: FormatGenre },
+    { count: 2, label: 'entity.genre', render: FormatGenre },
     {
         label: 'common.duration',
         render: (artist) => artist.duration && formatDurationString(artist.duration),
@@ -243,7 +251,7 @@ const AlbumArtistPropertyMapping: ItemDetailRow<AlbumArtist>[] = [
 const PlaylistPropertyMapping: ItemDetailRow<Playlist>[] = [
     { key: 'name', label: 'common.title' },
     { key: 'description', label: 'common.description' },
-    { label: 'entity.genre_other', render: FormatGenre },
+    { count: 2, label: 'entity.genre', render: FormatGenre },
     {
         label: 'common.duration',
         render: (playlist) => playlist.duration && formatDurationString(playlist.duration),
@@ -266,11 +274,17 @@ const PlaylistPropertyMapping: ItemDetailRow<Playlist>[] = [
 const SongPropertyMapping: ItemDetailRow<Song>[] = [
     { key: 'name', label: 'common.title' },
     { key: 'path', label: 'common.path', render: SongPath },
-    { label: 'entity.albumArtist_one', render: (item) => formatArtists(item.albumArtists) },
-    { key: 'artists', label: 'entity.artist_other', render: (item) => formatArtists(item.artists) },
+    { count: 1, label: 'entity.albumArtist', render: (item) => formatArtists(item.albumArtists) },
     {
+        count: 2,
+        key: 'artists',
+        label: 'entity.artist',
+        render: (item) => formatArtists(item.artists),
+    },
+    {
+        count: 1,
         key: 'album',
-        label: 'entity.album_one',
+        label: 'entity.album',
         render: (song) =>
             song.albumId &&
             song.album && (
@@ -294,17 +308,34 @@ const SongPropertyMapping: ItemDetailRow<Song>[] = [
     },
     { key: 'discNumber', label: 'common.disc' },
     { key: 'trackNumber', label: 'common.trackNumber' },
-    { key: 'releaseYear', label: 'filter.releaseYear' },
+    {
+        key: 'date',
+        label: 'filter.date',
+        render: (song) => (song.date ? formatPartialIsoDateUTC(song.date) : null),
+    },
+    {
+        label: 'filter.year',
+        render: (song) => (!song.date ? song.year : null),
+    },
+    {
+        key: 'releaseDate',
+        label: 'filter.releaseDate',
+        render: (song) => (song.releaseDate ? formatPartialIsoDateUTC(song.releaseDate) : null),
+    },
+    {
+        label: 'filter.releaseYear',
+        render: (song) => (!song.releaseDate ? song.releaseYear : null),
+    },
     {
         label: 'filter.explicitStatus',
         render: (song, t) =>
             song.explicitStatus === ExplicitStatus.EXPLICIT
-                ? t('common.explicit', { postProcess: 'sentenceCase' })
+                ? t('common.explicit')
                 : song.explicitStatus === ExplicitStatus.CLEAN
-                  ? t('common.clean', { postProcess: 'sentenceCase' })
+                  ? t('common.clean')
                   : null,
     },
-    { label: 'entity.genre_other', render: FormatGenre },
+    { count: 2, label: 'entity.genre', render: FormatGenre },
     {
         label: 'common.duration',
         render: (song) => formatDurationString(song.duration),
@@ -314,7 +345,7 @@ const SongPropertyMapping: ItemDetailRow<Song>[] = [
     { key: 'bitRate', label: 'common.bitrate', render: (song) => `${song.bitRate} kbps` },
     { key: 'sampleRate', label: 'common.sampleRate' },
     { key: 'bitDepth', label: 'common.bitDepth' },
-    { key: 'channels', label: 'common.channel_other' },
+    { count: 2, key: 'channels', label: 'common.channel' },
     { key: 'size', label: 'common.size', render: (song) => formatSizeString(song.size) },
     {
         label: 'common.favorite',
@@ -369,7 +400,7 @@ const handleTags = (item: Album | Song, t: TFunction) => {
         if (tags.length) {
             return [
                 <Table.Tr key="tags">
-                    <Table.Th>{t('common.tags', { postProcess: 'sentenceCase' })}</Table.Th>
+                    <Table.Th>{t('common.tags')}</Table.Th>
                     <Table.Td>{tags.length}</Table.Td>
                 </Table.Tr>,
             ].concat(tags);
@@ -396,11 +427,7 @@ const handleParticipants = (item: Album | Song, t: TFunction) => {
         if (participants.length) {
             return [
                 <Table.Tr key="participants">
-                    <Table.Th>
-                        {t('common.additionalParticipants', {
-                            postProcess: 'sentenceCase',
-                        })}
-                    </Table.Th>
+                    <Table.Th>{t('common.additionalParticipants')}</Table.Th>
                     <Table.Td>{participants.length}</Table.Td>
                 </Table.Tr>,
             ].concat(participants);
@@ -421,9 +448,7 @@ export const ItemDetailsModal = ({ item, items }: ItemDetailsModalProps) => {
 
     const selectData = useMemo(() => {
         return allItems.map((it, index) => ({
-            label:
-                it.name ||
-                `${t('common.item', { defaultValue: 'Item', postProcess: 'sentenceCase' })} ${index + 1}`,
+            label: it.name || `${t('common.item', { defaultValue: 'Item' })} ${index + 1}`,
             value: String(index),
         }));
     }, [allItems, t]);

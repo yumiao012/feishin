@@ -10,6 +10,35 @@
     @media screen and (orientation: portrait) {
         padding: 2rem 2rem 1rem;
     }
+
+    :global(.full-screen-player-queue-header) {
+        opacity: 0.2;
+        transition: opacity 0.2s ease;
+    }
+
+    &:hover .controls-container {
+        [data-variant='subtle'] {
+            color: var(--theme-colors-foreground);
+            background: var(--theme-colors-surface);
+            border: 1px solid transparent;
+
+            &:hover,
+            &:active,
+            &:focus-visible {
+                @mixin dark {
+                    background: lighten(var(--theme-colors-surface), 5%);
+                }
+
+                @mixin light {
+                    background: lighten(var(--theme-colors-surface), 5%);
+                }
+            }
+        }
+    }
+
+    &:hover :global(.full-screen-player-queue-header) {
+        opacity: 1;
+    }
 }
 
 .responsive-container {

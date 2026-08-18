@@ -1,7 +1,10 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ALBUM_TABLE_COLUMNS } from '/@/renderer/components/item-list/item-table-list/default-columns';
+import {
+    ALBUM_TABLE_COLUMNS,
+    SONG_TABLE_COLUMNS,
+} from '/@/renderer/components/item-list/item-table-list/default-columns';
 import { useListContext } from '/@/renderer/context/list-context';
 import { useAlbumListFilters } from '/@/renderer/features/albums/hooks/use-album-list-filters';
 import { ListConfigMenu } from '/@/renderer/features/shared/components/list-config-menu';
@@ -35,8 +38,8 @@ export const AlbumListHeaderFilters = ({ toggleGenreTarget }: { toggleGenreTarge
 
     const choice = useMemo(() => {
         return target === GenreTarget.ALBUM
-            ? t('entity.album_other', { postProcess: 'titleCase' })
-            : t('entity.track_other', { postProcess: 'titleCase' });
+            ? t('entity.album', { count: 2 })
+            : t('entity.track', { count: 2 });
     }, [target, t]);
 
     const handleToggleGenreTarget = useCallback(() => {
@@ -51,15 +54,15 @@ export const AlbumListHeaderFilters = ({ toggleGenreTarget }: { toggleGenreTarge
 
         return Boolean(
             isFilterValueSet(query[FILTER_KEYS.ALBUM._CUSTOM]) ||
-                isFilterValueSet(query[FILTER_KEYS.ALBUM.ARTIST_IDS]) ||
-                query[FILTER_KEYS.ALBUM.COMPILATION] !== undefined ||
-                query[FILTER_KEYS.ALBUM.FAVORITE] !== undefined ||
-                isFilterValueSet(query[FILTER_KEYS.ALBUM.GENRE_ID]) ||
-                query[FILTER_KEYS.ALBUM.HAS_RATING] !== undefined ||
-                isFilterValueSet(query[FILTER_KEYS.ALBUM.MAX_YEAR]) ||
-                isFilterValueSet(query[FILTER_KEYS.ALBUM.MIN_YEAR]) ||
-                query[FILTER_KEYS.ALBUM.RECENTLY_PLAYED] !== undefined ||
-                isFilterValueSet(query[FILTER_KEYS.SHARED.SEARCH_TERM]),
+            isFilterValueSet(query[FILTER_KEYS.ALBUM.ARTIST_IDS]) ||
+            query[FILTER_KEYS.ALBUM.COMPILATION] !== undefined ||
+            query[FILTER_KEYS.ALBUM.FAVORITE] !== undefined ||
+            isFilterValueSet(query[FILTER_KEYS.ALBUM.GENRE_ID]) ||
+            query[FILTER_KEYS.ALBUM.HAS_RATING] !== undefined ||
+            isFilterValueSet(query[FILTER_KEYS.ALBUM.MAX_YEAR]) ||
+            isFilterValueSet(query[FILTER_KEYS.ALBUM.MIN_YEAR]) ||
+            query[FILTER_KEYS.ALBUM.RECENTLY_PLAYED] !== undefined ||
+            isFilterValueSet(query[FILTER_KEYS.SHARED.SEARCH_TERM]),
         );
     }, [albumFilters.query]);
 
@@ -92,8 +95,15 @@ export const AlbumListHeaderFilters = ({ toggleGenreTarget }: { toggleGenreTarge
                 <ListRefreshButton listKey={pageKey as ItemListKey} />
             </Group>
             <Group gap="sm" wrap="nowrap">
-                <ListDisplayTypeToggleButton listKey={ItemListKey.ALBUM} />
+                <ListDisplayTypeToggleButton enableDetail listKey={ItemListKey.ALBUM} />
                 <ListConfigMenu
+                    detailConfig={{
+                        optionsConfig: {
+                            autoFitColumns: { hidden: true },
+                        },
+                        tableColumnsData: SONG_TABLE_COLUMNS,
+                        tableKey: 'detail',
+                    }}
                     listKey={ItemListKey.ALBUM}
                     tableColumnsData={ALBUM_TABLE_COLUMNS}
                 />

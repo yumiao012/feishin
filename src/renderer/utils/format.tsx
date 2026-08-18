@@ -76,6 +76,16 @@ const getDayjsLocale = (i18nLang: string): string => {
     return localeMap[i18nLang] || 'en';
 };
 
+// BCP 47 tags for Intl (differs from dayjs locale ids for some languages).
+const getIntlLocale = (i18nLang: string): string => {
+    const localeMap: Record<string, string> = {
+        'zh-Hans': 'zh-CN',
+        'zh-Hant': 'zh-TW',
+    };
+
+    return localeMap[i18nLang] ?? i18nLang;
+};
+
 const updateDayjsLocale = () => {
     const dayjsLocale = getDayjsLocale(i18n.language);
     dayjs.locale(dayjsLocale);
@@ -87,36 +97,78 @@ updateDayjsLocale();
 // Listen for i18n language changes
 i18n.on('languageChanged', updateDayjsLocale);
 
-export const formatDateAbsolute = (key: null | string) => (key ? dayjs(key).format('LL') : '');
+export const formatDateAbsolute = (key: null | string) => (key ? dayjs(key).format('ll') : '');
 
 export const formatDateAbsoluteUTC = (key: null | string) =>
-    key ? dayjs.utc(key).format('LL') : '';
+    key ? dayjs.utc(key).format('ll') : '';
 
-export const formatHrDateTime = (key: null | string) => (key ? dayjs(key).format('LLL') : '');
+const PARTIAL_ISO_YEAR = /^\d{4}$/;
+const PARTIAL_ISO_YEAR_MONTH = /^\d{4}-\d{2}$/;
+
+export const formatPartialIsoDateUTC = (key: null | string): string => {
+    if (!key) {
+        return '';
+    }
+
+    const trimmedKey = key.trim();
+    const intlLocale = getIntlLocale(i18n.language);
+
+    if (PARTIAL_ISO_YEAR.test(trimmedKey)) {
+        const year = Number.parseInt(trimmedKey, 10);
+        if (!Number.isFinite(year)) {
+            return trimmedKey;
+        }
+
+        return new Intl.DateTimeFormat(intlLocale, { timeZone: 'UTC', year: 'numeric' }).format(
+            new Date(Date.UTC(year, 0, 1)),
+        );
+    }
+
+    if (PARTIAL_ISO_YEAR_MONTH.test(trimmedKey)) {
+        const d = dayjs.utc(`${trimmedKey}-01`);
+        if (!d.isValid()) {
+            return trimmedKey;
+        }
+
+        return new Intl.DateTimeFormat(intlLocale, {
+            month: 'long',
+            timeZone: 'UTC',
+            year: 'numeric',
+        }).format(d.toDate());
+    }
+
+    return dayjs.utc(trimmedKey).format('ll');
+};
+
+export const formatHrDateTime = (key: null | string) => (key ? dayjs(key).format('lll') : '');
 
 export const formatDateRelative = (key: null | string) => (key ? dayjs(key).fromNow() : '');
 
 export const formatDurationString = (duration: number) => {
     const rawDuration = formatDuration(duration, { leading: false }).split(':');
 
-    let string;
+    const formattedDuration = rawDuration.map((part) => {
+        // Remove leading zero
+        return part.replace(/^0/, '');
+    });
 
-    switch (rawDuration.length) {
-        case 1:
-            string = `${rawDuration[0]} ${i18n.t('datetime.secondShort')}`;
-            break;
-        case 2:
-            string = `${rawDuration[0]} ${i18n.t('datetime.minuteShort')} ${rawDuration[1]} ${i18n.t('datetime.secondShort')}`;
-            break;
-        case 3:
-            string = `${rawDuration[0]} ${i18n.t('datetime.hourShort')} ${rawDuration[1]} ${i18n.t('datetime.minuteShort')} ${rawDuration[2]} ${i18n.t('datetime.secondShort')}`;
-            break;
-        case 4:
-            string = `${rawDuration[0]} ${i18n.t('datetime.dayShort')} ${rawDuration[1]} ${i18n.t('datetime.hourShort')} ${rawDuration[2]} ${i18n.t('datetime.minuteShort')} ${rawDuration[3]} ${i18n.t('datetime.secondShort')}`;
-            break;
+    const parts: string[] = [];
+    const len = rawDuration.length;
+
+    if (len >= 1 && formattedDuration[len - 1] !== undefined) {
+        parts.push(`${formattedDuration[len - 1]}${i18n.t('datetime.secondShort')}`);
+    }
+    if (len >= 2 && formattedDuration[len - 2]) {
+        parts.unshift(`${formattedDuration[len - 2]}${i18n.t('datetime.minuteShort')}`);
+    }
+    if (len >= 3 && formattedDuration[len - 3]) {
+        parts.unshift(`${formattedDuration[len - 3]}${i18n.t('datetime.hourShort')}`);
+    }
+    if (len >= 4 && formattedDuration[len - 4]) {
+        parts.unshift(`${formattedDuration[len - 4]}${i18n.t('datetime.dayShort')}`);
     }
 
-    return string;
+    return parts.join(' ');
 };
 
 export const formatDurationStringShort = (duration: number) => {

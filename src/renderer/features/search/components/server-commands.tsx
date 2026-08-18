@@ -3,6 +3,7 @@ import { Dispatch, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
+import { isServerLock } from '/@/renderer/features/action-required/utils/window-properties';
 import { Command, CommandPalettePages } from '/@/renderer/features/search/components/command';
 import { ServerList } from '/@/renderer/features/servers/components/server-list';
 import { AppRoute } from '/@/renderer/router/routes';
@@ -24,7 +25,7 @@ export const ServerCommands = ({ handleClose, setPages, setQuery }: ServerComman
     const handleManageServersModal = useCallback(() => {
         openModal({
             children: <ServerList />,
-            title: t('page.appMenu.manageServers', { postProcess: 'sentenceCase' }),
+            title: t('page.appMenu.manageServers'),
         });
         handleClose();
         setQuery('');
@@ -42,13 +43,9 @@ export const ServerCommands = ({ handleClose, setPages, setQuery }: ServerComman
         [handleClose, navigate, setCurrentServer, setPages, setQuery],
     );
 
-    const isServerLock = Boolean(window.SERVER_LOCK) || false;
-
     return (
         <>
-            <Command.Group
-                heading={t('page.appMenu.selectServer', { postProcess: 'sentenceCase' })}
-            >
+            <Command.Group heading={t('page.appMenu.selectServer')}>
                 {Object.keys(serverList).map((key) => (
                     <Command.Item
                         key={key}
@@ -56,10 +53,10 @@ export const ServerCommands = ({ handleClose, setPages, setQuery }: ServerComman
                     >{`${serverList[key].name}...`}</Command.Item>
                 ))}
             </Command.Group>
-            {!isServerLock && (
-                <Command.Group heading={t('common.manage', { postProcess: 'sentenceCase' })}>
+            {!isServerLock() && (
+                <Command.Group heading={t('common.manage')}>
                     <Command.Item onSelect={handleManageServersModal}>
-                        {t('page.appMenu.manageServers', { postProcess: 'sentenceCase' })}...
+                        {t('page.appMenu.manageServers')}...
                     </Command.Item>
                 </Command.Group>
             )}

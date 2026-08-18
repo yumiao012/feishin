@@ -6,6 +6,8 @@ import { PageHeader } from '/@/renderer/components/page-header/page-header';
 import { ActionRequiredContainer } from '/@/renderer/features/action-required/components/action-required-container';
 import { ServerCredentialRequired } from '/@/renderer/features/action-required/components/server-credential-required';
 import { ServerRequired } from '/@/renderer/features/action-required/components/server-required';
+import styles from '/@/renderer/features/action-required/routes/action-required-route.module.css';
+import { isServerLock } from '/@/renderer/features/action-required/utils/window-properties';
 import LoginRoute from '/@/renderer/features/login/routes/login-route';
 import { ServerList } from '/@/renderer/features/servers/components/server-list';
 import { AnimatedPage } from '/@/renderer/features/shared/components/animated-page';
@@ -13,9 +15,9 @@ import { PageErrorBoundary } from '/@/renderer/features/shared/components/page-e
 import { AppRoute } from '/@/renderer/router/routes';
 import { useCurrentServerWithCredential } from '/@/renderer/store';
 import { Button } from '/@/shared/components/button/button';
-import { Center } from '/@/shared/components/center/center';
 import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
+import { ScrollArea } from '/@/shared/components/scroll-area/scroll-area';
 import { Stack } from '/@/shared/components/stack/stack';
 
 const ActionRequiredRoute = () => {
@@ -24,18 +26,17 @@ const ActionRequiredRoute = () => {
     const isServerRequired = !currentServer;
     const isCredentialRequired = currentServer && !currentServer.credential;
 
-    const isServerLock = Boolean(window.SERVER_LOCK) || false;
-    const isLoginRequired = isServerLock && !currentServer;
+    const isLoginRequired = isServerLock() && !currentServer;
 
     const checks = [
         {
             component: <ServerCredentialRequired />,
-            title: t('error.credentialsRequired', { postProcess: 'sentenceCase' }),
+            title: t('error.credentialsRequired'),
             valid: !isCredentialRequired,
         },
         {
             component: <ServerRequired />,
-            title: t('error.serverRequired', { postProcess: 'serverRequired' }),
+            title: t('error.serverRequired'),
             valid: !isServerRequired,
         },
     ];
@@ -46,7 +47,7 @@ const ActionRequiredRoute = () => {
     const handleManageServersModal = () => {
         openModal({
             children: <ServerList />,
-            title: t('page.appMenu.manageServers', { postProcess: 'sentenceCase' }),
+            title: t('page.appMenu.manageServers'),
         });
     };
 
@@ -57,35 +58,35 @@ const ActionRequiredRoute = () => {
     return (
         <AnimatedPage>
             <PageHeader />
-            <Center style={{ height: '100%', width: '100vw' }}>
-                <Stack gap="xl" style={{ maxWidth: '50%' }}>
-                    <Group wrap="nowrap">
-                        {displayedCheck && (
-                            <ActionRequiredContainer title={displayedCheck.title}>
-                                {displayedCheck?.component}
-                            </ActionRequiredContainer>
-                        )}
-                    </Group>
-                    <Stack mt="2rem">
-                        {canReturnHome && <Navigate to={AppRoute.HOME} />}
-                        {/* This should be displayed if a credential is required */}
-                        {isCredentialRequired && !isServerLock && (
-                            <Group justify="center" wrap="nowrap">
-                                <Button
-                                    fullWidth
-                                    leftSection={<Icon icon="edit" />}
-                                    onClick={handleManageServersModal}
-                                    variant="filled"
-                                >
-                                    {t('page.appMenu.manageServers', {
-                                        postProcess: 'sentenceCase',
-                                    })}
-                                </Button>
-                            </Group>
-                        )}
-                    </Stack>
+            <div className={styles.wrapper}>
+                <Stack className={styles.content} gap="xl">
+                    <ScrollArea className={styles.scrollArea}>
+                        <Group className={styles.checkGroup} wrap="nowrap">
+                            {displayedCheck && (
+                                <ActionRequiredContainer title={displayedCheck.title}>
+                                    {displayedCheck?.component}
+                                </ActionRequiredContainer>
+                            )}
+                        </Group>
+                        <Stack className={styles.actions}>
+                            {canReturnHome && <Navigate to={AppRoute.HOME} />}
+                            {/* This should be displayed if a credential is required */}
+                            {isCredentialRequired && !isServerLock && (
+                                <Group justify="center" wrap="nowrap">
+                                    <Button
+                                        fullWidth
+                                        leftSection={<Icon icon="edit" />}
+                                        onClick={handleManageServersModal}
+                                        variant="filled"
+                                    >
+                                        {t('page.appMenu.manageServers')}
+                                    </Button>
+                                </Group>
+                            )}
+                        </Stack>
+                    </ScrollArea>
                 </Stack>
-            </Center>
+            </div>
         </AnimatedPage>
     );
 };

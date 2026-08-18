@@ -1,7 +1,16 @@
+import type { MantineThemeOverride } from '@mantine/core';
+
+import { generateColors } from '@mantine/colors-generator';
 import { useMantineColorScheme } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { useSettingsStore } from '/@/renderer/store/settings.store';
+import { useCustomThemes } from '/@/renderer/store/custom-themes.store';
+import {
+    useAccent,
+    useFontSettings,
+    useNativeAspectRatio,
+    useThemeSettings,
+} from '/@/renderer/store/settings.store';
 import { createMantineTheme } from '/@/renderer/themes/mantine-theme';
 import { getAppTheme } from '/@/shared/themes/app-theme';
 import { AppTheme, AppThemeConfiguration } from '/@/shared/themes/app-theme-types';
@@ -15,8 +24,11 @@ export const THEME_DATA = [
     { label: 'One Dark', type: 'dark', value: AppTheme.ONE_DARK },
     { label: 'Solarized Dark', type: 'dark', value: AppTheme.SOLARIZED_DARK },
     { label: 'Solarized Light', type: 'light', value: AppTheme.SOLARIZED_LIGHT },
+    { label: 'Everforest Dark', type: 'dark', value: AppTheme.EVERFOREST_DARK },
+    { label: 'Everforest Light', type: 'light', value: AppTheme.EVERFOREST_LIGHT },
     { label: 'GitHub Dark', type: 'dark', value: AppTheme.GITHUB_DARK },
     { label: 'GitHub Light', type: 'light', value: AppTheme.GITHUB_LIGHT },
+    { label: 'Glassy Dark', type: 'dark', value: AppTheme.GLASSY_DARK },
     { label: 'Monokai', type: 'dark', value: AppTheme.MONOKAI },
     { label: 'High Contrast Dark', type: 'dark', value: AppTheme.HIGH_CONTRAST_DARK },
     { label: 'High Contrast Light', type: 'light', value: AppTheme.HIGH_CONTRAST_LIGHT },
@@ -33,71 +45,48 @@ export const THEME_DATA = [
     { label: 'Shades of Purple', type: 'dark', value: AppTheme.SHADES_OF_PURPLE },
     { label: 'VS Code Dark+', type: 'dark', value: AppTheme.VSCODE_DARK_PLUS },
     { label: 'VS Code Light+', type: 'light', value: AppTheme.VSCODE_LIGHT_PLUS },
+    { label: 'Rosé Pine', type: 'dark', value: AppTheme.ROSE_PINE },
+    { label: 'Rosé Pine Moon', type: 'dark', value: AppTheme.ROSE_PINE_MOON },
+    { label: 'Rosé Pine Dawn', type: 'light', value: AppTheme.ROSE_PINE_DAWN },
+    { label: 'Zenburn', type: 'dark', value: AppTheme.ZENBURN },
 ];
 
 export const useAppTheme = (overrideTheme?: AppTheme) => {
-    const accent = useSettingsStore((store) => store.general.accent);
-    const nativeImageAspect = useSettingsStore((store) => store.general.nativeAspectRatio);
-    const { builtIn, custom, system, type } = useSettingsStore((state) => state.font);
+    const accent = useAccent();
+    const nativeImageAspect = useNativeAspectRatio();
+    const { builtIn, custom, system, type } = useFontSettings();
+    // Not read directly, but its identity changes whenever the custom
+    // themes folder is reloaded, which is what we want to react to below.
+    const customThemes = useCustomThemes();
     const textStyleRef = useRef<HTMLStyleElement | null>(null);
-    const loadedStylesheetsRef = useRef<Set<string>>(new Set());
+    const themeInlineStylesRef = useRef<HTMLStyleElement | null>(null);
     const getCurrentTheme = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
     const [isDarkTheme, setIsDarkTheme] = useState(getCurrentTheme());
-    const { followSystemTheme, theme, themeDark, themeLight, useThemeAccentColor } =
-        useSettingsStore((state) => state.general);
+    const {
+        followSystemTheme,
+        primaryShade,
+        theme,
+        themeDark,
+        themeLight,
+        useThemeAccentColor,
+        useThemePrimaryShade,
+    } = useThemeSettings();
 
     const mqListener = (e: any) => {
         setIsDarkTheme(e.matches);
     };
 
-    const loadStylesheet = (href: string): Promise<void> => {
-        return new Promise((resolve, reject) => {
-            if (loadedStylesheetsRef.current.has(href)) {
-                resolve();
-                return;
-            }
+    const applyInlineStylesheets = useCallback((inlineCssStrings: string[] = []) => {
+        const cssText = inlineCssStrings.filter(Boolean).join('\n');
 
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = href;
-            link.onload = () => {
-                loadedStylesheetsRef.current.add(href);
-                resolve();
-            };
-            link.onerror = () => {
-                console.warn(`Failed to load stylesheet: ${href}`);
-                reject(new Error(`Failed to load stylesheet: ${href}`));
-            };
-
-            document.head.appendChild(link);
-        });
-    };
-
-    const unloadStylesheet = (href: string) => {
-        const existingLink = document.querySelector(`link[href="${href}"]`);
-        if (existingLink) {
-            existingLink.remove();
-            loadedStylesheetsRef.current.delete(href);
-        }
-    };
-
-    const loadThemeStylesheets = useCallback(async (stylesheets: string[] = []) => {
-        if (loadedStylesheetsRef.current.size > 0) {
-            loadedStylesheetsRef.current.forEach((href) => unloadStylesheet(href));
-            loadedStylesheetsRef.current.clear();
+        if (!themeInlineStylesRef.current) {
+            const styleEl = document.createElement('style');
+            styleEl.id = 'theme-inline-styles';
+            document.head.appendChild(styleEl);
+            themeInlineStylesRef.current = styleEl;
         }
 
-        if (stylesheets.length === 0) {
-            return;
-        }
-
-        const loadPromises = stylesheets.map((href) =>
-            loadStylesheet(href).catch((error) => {
-                console.warn(`Error loading stylesheet ${href}:`, error);
-            }),
-        );
-
-        await Promise.all(loadPromises);
+        themeInlineStylesRef.current.textContent = cssText;
     }, []);
 
     const getSelectedTheme = () => {
@@ -125,7 +114,7 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
             const root = document.documentElement;
             root.style.setProperty(
                 '--theme-content-font-family',
-                'dynamic-font, "Noto Sans JP", sans-serif',
+                'dynamic-font, "Noto Sans JP", "Noto Sans Hebrew", sans-serif',
             );
 
             if (!textStyleRef.current) {
@@ -142,7 +131,7 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
             const root = document.documentElement;
             root.style.setProperty(
                 '--theme-content-font-family',
-                'dynamic-font, "Noto Sans JP", sans-serif',
+                'dynamic-font, "Noto Sans JP", "Noto Sans Hebrew", sans-serif',
             );
 
             if (!textStyleRef.current) {
@@ -150,16 +139,21 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
                 document.body.appendChild(textStyleRef.current);
             }
 
+            // Note: we change the url to bust caches when changing the path
+            // The url provided here does NOT matter, validation is done
+            // on the main process. Any feishin:/ url will fetch the same
+            // item, which the renderer will check via magic number to be
+            // some font item
             textStyleRef.current.textContent = `
             @font-face {
                 font-family: "dynamic-font";
-                src: url("feishin://${custom}");
+                src: url("feishin:${custom}");
             }`;
         } else {
             const root = document.documentElement;
             root.style.setProperty(
                 '--theme-content-font-family',
-                `${builtIn}, "Noto Sans JP", sans-serif`,
+                `${builtIn}, "Noto Sans JP", "Noto Sans Hebrew", sans-serif`,
             );
         }
     }, [builtIn, custom, system, type]);
@@ -172,14 +166,36 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
             ? themeProperties.colors?.primary || themeProperties.colors?.['state-info'] || accent
             : accent;
 
+        // Use theme's primary shade if useThemePrimaryShade is enabled, otherwise use slider value (0-9)
+        const effectivePrimaryShade: MantineThemeOverride['primaryShade'] = useThemePrimaryShade
+            ? themeProperties.mantineOverride?.primaryShade
+            : ({ dark: primaryShade, light: primaryShade } as MantineThemeOverride['primaryShade']);
+
         return {
             ...themeProperties,
             colors: {
                 ...themeProperties.colors,
                 primary: primaryColor,
             },
+            mantineOverride: {
+                ...themeProperties.mantineOverride,
+                ...(effectivePrimaryShade != null && { primaryShade: effectivePrimaryShade }),
+            },
         };
-    }, [accent, selectedTheme, useThemeAccentColor]);
+        // customThemes is not read directly above, but getAppTheme resolves
+        // custom theme ids through a registry that's mutated in place
+        // whenever the themes folder is reloaded (see custom-themes.store.ts).
+        // Including it here is what makes an edited custom theme's colors
+        // get picked up without a manual reselect.
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- customThemes is read indirectly via getAppTheme's registry lookup, not referenced directly above
+    }, [
+        accent,
+        customThemes,
+        primaryShade,
+        selectedTheme,
+        useThemeAccentColor,
+        useThemePrimaryShade,
+    ]);
 
     useEffect(() => {
         const root = document.documentElement;
@@ -187,8 +203,31 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
         const primaryColor = useThemeAccentColor
             ? themeProperties.colors?.primary || themeProperties.colors?.['state-info'] || accent
             : accent;
-        root.style.setProperty('--theme-colors-primary', primaryColor);
-    }, [accent, selectedTheme, useThemeAccentColor]);
+        const effectivePrimaryShade: MantineThemeOverride['primaryShade'] = useThemePrimaryShade
+            ? themeProperties.mantineOverride?.primaryShade
+            : ({ dark: primaryShade, light: primaryShade } as MantineThemeOverride['primaryShade']);
+        const mode = themeProperties.mode ?? (isDarkTheme ? 'dark' : 'light');
+        const shadeIndex = Math.min(
+            9,
+            Math.max(
+                0,
+                typeof effectivePrimaryShade === 'object'
+                    ? (effectivePrimaryShade?.[mode] ?? 6)
+                    : (effectivePrimaryShade ?? 6),
+            ),
+        );
+        const primaryScale = generateColors(primaryColor);
+        const primaryAtShade = primaryScale[shadeIndex];
+        root.style.setProperty('--theme-colors-primary', primaryAtShade);
+    }, [
+        accent,
+        customThemes,
+        isDarkTheme,
+        primaryShade,
+        selectedTheme,
+        useThemeAccentColor,
+        useThemePrimaryShade,
+    ]);
 
     useEffect(() => {
         const root = document.documentElement;
@@ -196,10 +235,8 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
     }, [nativeImageAspect]);
 
     useEffect(() => {
-        if (appTheme?.stylesheets) {
-            loadThemeStylesheets(appTheme.stylesheets);
-        }
-    }, [selectedTheme, appTheme?.stylesheets, loadThemeStylesheets]);
+        applyInlineStylesheets(appTheme?.stylesheets ?? []);
+    }, [selectedTheme, appTheme?.stylesheets, applyInlineStylesheets]);
 
     const themeVars = useMemo(() => {
         return Object.entries(appTheme?.app ?? {})
@@ -244,9 +281,14 @@ export const useAppTheme = (overrideTheme?: AppTheme) => {
         }
     }, [colorVars, selectedTheme, themeVars]);
 
+    const mantineTheme = useMemo(
+        () => createMantineTheme(appTheme as AppThemeConfiguration),
+        [appTheme],
+    );
+
     return {
         mode: appTheme?.mode || 'dark',
-        theme: createMantineTheme(appTheme as AppThemeConfiguration),
+        theme: mantineTheme,
     };
 };
 
@@ -263,11 +305,21 @@ export const useColorScheme = () => {
 };
 
 export const useAppThemeColors = () => {
-    const accent = useSettingsStore((store) => store.general.accent);
+    const accent = useAccent();
     const getCurrentTheme = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
     const [isDarkTheme] = useState(getCurrentTheme());
-    const { followSystemTheme, theme, themeDark, themeLight, useThemeAccentColor } =
-        useSettingsStore((state) => state.general);
+    // Not read directly, but its identity changes whenever the custom
+    // themes folder is reloaded, which is what we want to react to below.
+    const customThemes = useCustomThemes();
+    const {
+        followSystemTheme,
+        primaryShade,
+        theme,
+        themeDark,
+        themeLight,
+        useThemeAccentColor,
+        useThemePrimaryShade,
+    } = useThemeSettings();
 
     const getSelectedTheme = () => {
         if (followSystemTheme) {
@@ -287,14 +339,31 @@ export const useAppThemeColors = () => {
             ? themeProperties.colors?.primary || themeProperties.colors?.['state-info'] || accent
             : accent;
 
+        // Use theme's primary shade if useThemePrimaryShade is enabled, otherwise use slider value (0-9)
+        const effectivePrimaryShade: MantineThemeOverride['primaryShade'] = useThemePrimaryShade
+            ? themeProperties.mantineOverride?.primaryShade
+            : ({ dark: primaryShade, light: primaryShade } as MantineThemeOverride['primaryShade']);
+
         return {
             ...themeProperties,
             colors: {
                 ...themeProperties.colors,
                 primary: primaryColor,
             },
+            mantineOverride: {
+                ...themeProperties.mantineOverride,
+                ...(effectivePrimaryShade != null && { primaryShade: effectivePrimaryShade }),
+            },
         };
-    }, [accent, selectedTheme, useThemeAccentColor]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- customThemes is read indirectly via getAppTheme's registry lookup, not referenced directly above
+    }, [
+        accent,
+        customThemes,
+        primaryShade,
+        selectedTheme,
+        useThemeAccentColor,
+        useThemePrimaryShade,
+    ]);
 
     const themeVars = useMemo(() => {
         return Object.entries(appTheme?.app ?? {})

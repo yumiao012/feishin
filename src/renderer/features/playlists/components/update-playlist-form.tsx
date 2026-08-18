@@ -1,23 +1,32 @@
-import { closeModal, ContextModalProps, openContextModal } from '@mantine/modals';
+import { closeModal, ContextModalProps } from '@mantine/modals';
 import { useQuery } from '@tanstack/react-query';
 import { t } from 'i18next';
+import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import i18n from '/@/i18n/i18n';
+import { ItemImage } from '/@/renderer/components/item-image/item-image';
+import { useDeletePlaylistImage } from '/@/renderer/features/playlists/mutations/delete-playlist-image-mutation';
 import { useUpdatePlaylist } from '/@/renderer/features/playlists/mutations/update-playlist-mutation';
+import { useUploadPlaylistImage } from '/@/renderer/features/playlists/mutations/upload-playlist-image-mutation';
 import { sharedQueries } from '/@/renderer/features/shared/api/shared-api';
 import { useCurrentServer, useCurrentServerId, usePermissions } from '/@/renderer/store';
 import { hasFeature } from '/@/shared/api/utils';
+import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
+import { Box } from '/@/shared/components/box/box';
+import { DragDropZone } from '/@/shared/components/drag-drop-zone/drag-drop-zone';
+import { FileButton } from '/@/shared/components/file-button/file-button';
+import { Flex } from '/@/shared/components/flex/flex';
 import { Group } from '/@/shared/components/group/group';
 import { ModalButton } from '/@/shared/components/modal/model-shared';
 import { Select } from '/@/shared/components/select/select';
 import { Stack } from '/@/shared/components/stack/stack';
 import { Switch } from '/@/shared/components/switch/switch';
 import { TextInput } from '/@/shared/components/text-input/text-input';
+import { Textarea } from '/@/shared/components/textarea/textarea';
 import { toast } from '/@/shared/components/toast/toast';
 import { useForm } from '/@/shared/hooks/use-form';
 import {
-    Playlist,
+    LibraryItem,
     ServerType,
     SortOrder,
     UpdatePlaylistBody,
@@ -26,17 +35,41 @@ import {
 } from '/@/shared/types/domain-types';
 import { ServerFeature } from '/@/shared/types/features-types';
 
+type PlaylistImageProps = {
+    imageId: null | string;
+    imageUrl: null | string;
+    uploadedImage?: string;
+};
+
 export const UpdatePlaylistContextModal = ({
     id,
     innerProps,
 }: ContextModalProps<{
     body: Partial<UpdatePlaylistBody>;
+    playlistImage?: PlaylistImageProps;
     query: UpdatePlaylistQuery;
 }>) => {
     const { t } = useTranslation();
-    const mutation = useUpdatePlaylist({});
+    const updateMutation = useUpdatePlaylist({});
+    const uploadImageMutation = useUploadPlaylistImage({});
+    const deleteImageMutation = useDeletePlaylistImage({});
     const server = useCurrentServer();
-    const { body, query } = innerProps;
+    const { body, playlistImage, query } = innerProps;
+
+    const [pendingFile, setPendingFile] = useState<File | null>(null);
+    const [pendingPreviewUrl, setPendingPreviewUrl] = useState<null | string>(null);
+    const [removeCustomCover, setRemoveCustomCover] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        if (!pendingFile) {
+            setPendingPreviewUrl(null);
+            return;
+        }
+        const url = URL.createObjectURL(pendingFile);
+        setPendingPreviewUrl(url);
+        return () => URL.revokeObjectURL(url);
+    }, [pendingFile]);
 
     const form = useForm<UpdatePlaylistBody>({
         initialValues: {
@@ -49,90 +82,265 @@ export const UpdatePlaylistContextModal = ({
         },
     });
 
-    const handleSubmit = form.onSubmit((values) => {
-        mutation.mutate(
-            {
-                apiClientProps: { serverId: server?.id || '' },
+    const handleSubmit = form.onSubmit(async (values) => {
+        if (!server?.id) return;
+
+        setIsSaving(true);
+        try {
+            await updateMutation.mutateAsync({
+                apiClientProps: { serverId: server.id },
                 body: values,
                 query,
-            },
-            {
-                onError: (err) => {
-                    toast.error({
-                        message: err.message,
-                        title: t('error.genericError', { postProcess: 'sentenceCase' }),
-                    });
-                },
-                onSuccess: () => {
-                    toast.success({
-                        message: t('form.editPlaylist.success', { postProcess: 'sentenceCase' }),
-                    });
-                    closeModal(id);
-                },
-            },
-        );
+            });
+
+            if (pendingFile) {
+                const buffer = await pendingFile.arrayBuffer();
+                await uploadImageMutation.mutateAsync({
+                    apiClientProps: { serverId: server.id },
+                    body: { image: new Uint8Array(buffer) },
+                    query: { id: query.id },
+                });
+            } else if (removeCustomCover && playlistImage?.uploadedImage) {
+                await deleteImageMutation.mutateAsync({
+                    apiClientProps: { serverId: server.id },
+                    query: { id: query.id },
+                });
+            }
+
+            toast.success({
+                message: t('form.editPlaylist.success'),
+            });
+            closeModal(id);
+        } catch (err: any) {
+            toast.error({
+                message: err?.message,
+                title: t('error.genericError'),
+            });
+        } finally {
+            setIsSaving(false);
+        }
     });
 
     const isPublicDisplayed = hasFeature(server, ServerFeature.PUBLIC_PLAYLIST);
     const isOwnerDisplayed = server?.type === ServerType.NAVIDROME;
     const isCommentDisplayed = server?.type === ServerType.NAVIDROME;
-    const isSubmitDisabled = !form.values.name || mutation.isPending;
+    const isCoverImageDisplayed = hasFeature(server, ServerFeature.PLAYLIST_IMAGE_UPLOAD);
+    const isSubmitDisabled = !form.values.name || isSaving;
+    const hadUploadedCover = !!playlistImage?.uploadedImage;
+
+    const fieldNodes: ReactNode[] = [
+        <TextInput
+            data-autofocus
+            key="name"
+            label={t('form.createPlaylist.input', {
+                context: 'name',
+            })}
+            required
+            {...form.getInputProps('name')}
+        />,
+    ];
+
+    if (isCommentDisplayed) {
+        fieldNodes.push(
+            <Textarea
+                autosize
+                key="comment"
+                label={t('form.createPlaylist.input', {
+                    context: 'description',
+                })}
+                minRows={5}
+                {...form.getInputProps('comment')}
+            />,
+        );
+    }
+
+    if (isOwnerDisplayed) {
+        fieldNodes.push(<OwnerSelect form={form} key="owner" />);
+    }
+
+    if (isPublicDisplayed) {
+        if (server?.type === ServerType.JELLYFIN) {
+            fieldNodes.push(
+                <div key="jellyfin-public-note">{t('form.editPlaylist.publicJellyfinNote')}</div>,
+            );
+        }
+        fieldNodes.push(
+            <Switch
+                key="public"
+                label={t('form.createPlaylist.input', {
+                    context: 'public',
+                })}
+                {...form.getInputProps('public', { type: 'checkbox' })}
+            />,
+        );
+    }
+
+    fieldNodes.push(
+        <Group justify="flex-end" key="actions">
+            <ModalButton disabled={isSaving} onClick={() => closeModal(id)}>
+                {t('common.cancel')}
+            </ModalButton>
+            <ModalButton
+                disabled={isSubmitDisabled}
+                loading={isSaving}
+                type="submit"
+                variant="filled"
+            >
+                {t('common.save')}
+            </ModalButton>
+        </Group>,
+    );
 
     return (
         <form onSubmit={handleSubmit}>
-            <Stack>
-                <TextInput
-                    data-autofocus
-                    label={t('form.createPlaylist.input', {
-                        context: 'name',
-                        postProcess: 'titleCase',
-                    })}
-                    required
-                    {...form.getInputProps('name')}
-                />
-                {isCommentDisplayed && (
-                    <TextInput
-                        label={t('form.createPlaylist.input', {
-                            context: 'description',
-                            postProcess: 'titleCase',
-                        })}
-                        {...form.getInputProps('comment')}
+            {isCoverImageDisplayed ? (
+                <Flex align="flex-start" gap="lg" wrap="wrap">
+                    <PlaylistCoverField
+                        hadUploadedCover={hadUploadedCover}
+                        onClearPending={() => setPendingFile(null)}
+                        onFileSelect={(file) => {
+                            if (!file) return;
+                            setRemoveCustomCover(false);
+                            setPendingFile(file);
+                        }}
+                        onToggleRemoveCover={() => setRemoveCustomCover((v) => !v)}
+                        pendingFile={pendingFile}
+                        pendingPreviewUrl={pendingPreviewUrl}
+                        playlistImage={playlistImage}
+                        removeCustomCover={removeCustomCover}
                     />
-                )}
-                {isOwnerDisplayed && <OwnerSelect form={form} />}
-                {isPublicDisplayed && (
-                    <>
-                        {server?.type === ServerType.JELLYFIN && (
-                            <div>
-                                {t('form.editPlaylist.publicJellyfinNote', {
-                                    postProcess: 'sentenceCase',
-                                })}
-                            </div>
-                        )}
-                        <Switch
-                            label={t('form.createPlaylist.input', {
-                                context: 'public',
-                                postProcess: 'titleCase',
-                            })}
-                            {...form.getInputProps('public', { type: 'checkbox' })}
-                        />
-                    </>
-                )}
-                <Group justify="flex-end">
-                    <ModalButton onClick={() => closeModal(id)}>{t('common.cancel')}</ModalButton>
-                    <ModalButton
-                        disabled={isSubmitDisabled}
-                        loading={mutation.isPending}
-                        type="submit"
-                        variant="filled"
-                    >
-                        {t('common.save')}
-                    </ModalButton>
-                </Group>
-            </Stack>
+                    <Stack gap="md" style={{ flex: '1 1 220px', minWidth: 0 }}>
+                        {fieldNodes}
+                    </Stack>
+                </Flex>
+            ) : (
+                <Stack gap="md">{fieldNodes}</Stack>
+            )}
         </form>
     );
 };
+
+const COVER_SIZE = 240;
+
+function PlaylistCoverField({
+    hadUploadedCover,
+    onClearPending,
+    onFileSelect,
+    onToggleRemoveCover,
+    pendingFile,
+    pendingPreviewUrl,
+    playlistImage,
+    removeCustomCover,
+}: {
+    hadUploadedCover: boolean;
+    onClearPending: () => void;
+    onFileSelect: (file: File | null) => void;
+    onToggleRemoveCover: () => void;
+    pendingFile: File | null;
+    pendingPreviewUrl: null | string;
+    playlistImage?: PlaylistImageProps;
+    removeCustomCover: boolean;
+}) {
+    const server = useCurrentServer();
+
+    const showServerCover = !pendingPreviewUrl && !removeCustomCover;
+    const previewId = showServerCover ? playlistImage?.imageId || undefined : undefined;
+    const previewSrc = pendingPreviewUrl || (showServerCover ? playlistImage?.imageUrl || '' : '');
+
+    const secondaryAction = () => {
+        if (pendingFile) {
+            onClearPending();
+            return;
+        }
+        if (hadUploadedCover) {
+            onToggleRemoveCover();
+        }
+    };
+
+    const secondaryDisabled = !pendingFile && !hadUploadedCover;
+
+    const secondaryIcon = pendingFile ? 'x' : removeCustomCover ? 'arrowLeft' : 'delete';
+
+    const iconControls = (
+        <>
+            <FileButton accept="image/*" onChange={onFileSelect}>
+                {(props) => {
+                    const { ...triggerRest } = props;
+                    return (
+                        <ActionIcon
+                            icon="uploadImage"
+                            iconProps={{ size: 'lg' }}
+                            radius="xl"
+                            size="sm"
+                            variant="default"
+                            {...triggerRest}
+                            style={{ pointerEvents: 'auto' }}
+                        />
+                    );
+                }}
+            </FileButton>
+            <ActionIcon
+                disabled={secondaryDisabled}
+                icon={secondaryIcon}
+                iconProps={{ size: 'lg' }}
+                onClick={secondaryAction}
+                radius="xl"
+                size="sm"
+                style={{ pointerEvents: 'auto' }}
+                variant="default"
+            />
+        </>
+    );
+
+    return (
+        <Box
+            style={{
+                borderRadius: 'var(--mantine-radius-md)',
+                flexShrink: 0,
+                height: COVER_SIZE,
+                overflow: 'hidden',
+                position: 'relative',
+                width: COVER_SIZE,
+            }}
+        >
+            <DragDropZone
+                accept="image/*"
+                mode="file"
+                onFileSelected={(file) => onFileSelect(file)}
+                style={{
+                    height: '100%',
+                    overflow: 'hidden',
+                    position: 'relative',
+                    width: '100%',
+                }}
+            >
+                <ItemImage
+                    enableViewport={false}
+                    id={previewId}
+                    itemType={LibraryItem.PLAYLIST}
+                    serverId={server?.id}
+                    src={previewSrc}
+                    type="header"
+                />
+                <Group
+                    gap={4}
+                    style={{
+                        background: 'rgba(0, 0, 0, 0.55)',
+                        bottom: 6,
+                        padding: 4,
+                        pointerEvents: 'none',
+                        position: 'absolute',
+                        right: 6,
+                        zIndex: 2,
+                    }}
+                    wrap="nowrap"
+                >
+                    {iconControls}
+                </Group>
+            </DragDropZone>
+        </Box>
+    );
+}
 
 const OwnerSelect = ({ form }: { form: ReturnType<typeof useForm<UpdatePlaylistBody>> }) => {
     const serverId = useCurrentServerId();
@@ -162,29 +370,7 @@ const OwnerSelect = ({ form }: { form: ReturnType<typeof useForm<UpdatePlaylistB
             {...form.getInputProps('ownerId')}
             label={t('form.createPlaylist.input', {
                 context: 'owner',
-                postProcess: 'titleCase',
             })}
         />
     );
-};
-
-export const openUpdatePlaylistModal = async (args: { playlist: Playlist }) => {
-    const { playlist } = args;
-
-    openContextModal({
-        innerProps: {
-            body: {
-                comment: playlist?.description || undefined,
-                genres: playlist?.genres,
-                name: playlist?.name,
-                ownerId: playlist?.ownerId || undefined,
-                public: playlist?.public || false,
-                queryBuilderRules: playlist?.rules || undefined,
-                sync: playlist?.sync || undefined,
-            },
-            query: { id: playlist?.id },
-        },
-        modalKey: 'updatePlaylist',
-        title: i18n.t('form.editPlaylist.title', { postProcess: 'titleCase' }) as string,
-    });
 };

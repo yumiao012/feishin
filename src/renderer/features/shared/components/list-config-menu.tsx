@@ -1,6 +1,8 @@
 import { ReactNode, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import styles from './list-config-menu.module.css';
+
 import i18n from '/@/i18n/i18n';
 import { GridConfig } from '/@/renderer/features/shared/components/grid-config';
 import { SettingsButton } from '/@/renderer/features/shared/components/settings-button';
@@ -15,34 +17,48 @@ import { SegmentedControl } from '/@/shared/components/segmented-control/segment
 import { Stack } from '/@/shared/components/stack/stack';
 import { Switch } from '/@/shared/components/switch/switch';
 import { Table } from '/@/shared/components/table/table';
+import { Text } from '/@/shared/components/text/text';
 import { useDisclosure } from '/@/shared/hooks/use-disclosure';
 import { ItemListKey, ListDisplayType } from '/@/shared/types/types';
+
+export const SONG_DISPLAY_TYPES: ListConfigMenuDisplayTypeConfig[] = [
+    { hidden: true, value: ListDisplayType.DETAIL },
+];
 
 const DISPLAY_TYPES = [
     {
         label: (
-            <Group align="center" justify="center" p="sm">
+            <Group align="center" gap="sm" justify="center" p="sm" wrap="nowrap">
                 <Icon icon="layoutTable" size="lg" />
-                {i18n.t('table.config.view.table', { postProcess: 'sentenceCase' }) as string}
+                {i18n.t('table.config.view.table') as string}
             </Group>
         ),
         value: ListDisplayType.TABLE,
     },
     {
         label: (
-            <Group align="center" justify="center" p="sm">
+            <Group align="center" gap="sm" justify="center" p="sm" wrap="nowrap">
                 <Icon icon="layoutGrid" size="lg" />
-                {i18n.t('table.config.view.grid', { postProcess: 'sentenceCase' }) as string}
+                {i18n.t('table.config.view.grid') as string}
             </Group>
         ),
         value: ListDisplayType.GRID,
+    },
+    {
+        label: (
+            <Group align="center" gap="sm" justify="center" p="sm" wrap="nowrap">
+                <Icon icon="layoutDetail" size="lg" />
+                {i18n.t('table.config.view.detail') as string}
+            </Group>
+        ),
+        value: ListDisplayType.DETAIL,
     },
     // {
     //     disabled: true,
     //     label: (
     //         <Stack align="center" p="sm">
     //             <Icon icon="layoutList" size="lg" />
-    //             {i18n.t('table.config.view.list', { postProcess: 'sentenceCase' }) as string}
+    //             {i18n.t('table.config.view.list') as string}
     //         </Stack>
     //     ),
     //     value: ListDisplayType.LIST,
@@ -63,6 +79,12 @@ export const ListConfigBooleanControl = ({
     );
 };
 
+export interface ListConfigMenuDetailConfig {
+    optionsConfig?: ListConfigMenuOptionsConfig['detail'];
+    tableColumnsData: { label: string; value: string }[];
+    tableKey: 'detail';
+}
+
 export interface ListConfigMenuDisplayTypeConfig {
     disabled?: boolean;
     hidden?: boolean;
@@ -75,6 +97,9 @@ export interface ListConfigMenuOptionConfig {
 }
 
 export interface ListConfigMenuOptionsConfig {
+    detail?: {
+        [key: string]: ListConfigMenuOptionConfig;
+    };
     grid?: {
         [key: string]: ListConfigMenuOptionConfig;
     };
@@ -85,6 +110,7 @@ export interface ListConfigMenuOptionsConfig {
 
 interface ListConfigMenuProps {
     buttonProps?: ActionIconProps;
+    detailConfig?: ListConfigMenuDetailConfig;
     displayTypes?: ListConfigMenuDisplayTypeConfig[];
     listKey: ItemListKey;
     optionsConfig?: ListConfigMenuOptionsConfig;
@@ -125,12 +151,7 @@ export const ListConfigMenu = (props: ListConfigMenuProps) => {
     return (
         <>
             <SettingsButton {...props.buttonProps} onClick={handlers.toggle} />
-            <Modal
-                handlers={handlers}
-                opened={isOpen}
-                size="xl"
-                title={t('common.configure', { postProcess: 'sentenceCase' })}
-            >
+            <Modal handlers={handlers} opened={isOpen} size="xl" title={t('common.configure')}>
                 <Stack gap="xs">
                     {availableDisplayTypes.length > 1 && (
                         <ListConfigTable
@@ -151,9 +172,7 @@ export const ListConfigMenu = (props: ListConfigMenuProps) => {
                                         />
                                     ),
                                     id: 'displayType',
-                                    label: t('table.config.general.displayType', {
-                                        postProcess: 'sentenceCase',
-                                    }),
+                                    label: t('table.config.general.displayType'),
                                 },
                             ]}
                         />
@@ -172,6 +191,20 @@ const Config = ({
     ...props
 }: ListConfigMenuProps & { displayType: ListDisplayType }) => {
     switch (displayType) {
+        case ListDisplayType.DETAIL:
+            if (props.detailConfig) {
+                return (
+                    <TableConfig
+                        enablePinColumnButtons={false}
+                        listKey={props.listKey}
+                        optionsConfig={props.detailConfig.optionsConfig}
+                        tableColumnsData={props.detailConfig.tableColumnsData}
+                        tableKey="detail"
+                    />
+                );
+            }
+            return null;
+
         case ListDisplayType.GRID:
             return (
                 <GridConfig
@@ -198,12 +231,23 @@ const Config = ({
 export const ListConfigTable = ({
     options,
 }: {
-    options: { component: ReactNode; id: string; isDivider?: boolean; label: ReactNode | string }[];
+    options: {
+        component: ReactNode;
+        description?: ReactNode | string;
+        id: string;
+        isDivider?: boolean;
+        isHidden?: boolean;
+        label: ReactNode | string;
+    }[];
 }) => {
     return (
         <Table
-            style={{ borderRadius: '1rem' }}
-            styles={{ th: { backgroundColor: 'initial', padding: 'var(--theme-spacing-md) 0' } }}
+            className={styles.table}
+            classNames={{
+                td: styles.td,
+                th: styles.th,
+            }}
+            onClick={(e) => e.stopPropagation()}
             variant="vertical"
             withColumnBorders={false}
             withRowBorders={false}
@@ -211,19 +255,39 @@ export const ListConfigTable = ({
         >
             <Table.Tbody>
                 {options.map((option) => {
+                    if (option.isHidden) {
+                        return null;
+                    }
+
                     if (option.isDivider) {
                         return (
                             <Table.Tr key={option.id}>
-                                <Table.Td colSpan={2} px={0} py="md">
+                                <Table.Td className={styles.dividerCell} colSpan={2}>
                                     <Divider />
                                 </Table.Td>
                             </Table.Tr>
                         );
                     }
+
                     return (
                         <Table.Tr key={option.id}>
-                            <Table.Th w="50%">{option.label}</Table.Th>
-                            <Table.Td p={0}>{option.component}</Table.Td>
+                            <Table.Th>
+                                {option.description !== undefined ? (
+                                    <Stack gap="xs">
+                                        <Text isNoSelect size="sm">
+                                            {option.label}
+                                        </Text>
+                                        <Text isMuted isNoSelect size="xs">
+                                            {option.description}
+                                        </Text>
+                                    </Stack>
+                                ) : (
+                                    option.label
+                                )}
+                            </Table.Th>
+                            <Table.Td>
+                                <div className={styles.control}>{option.component}</div>
+                            </Table.Td>
                         </Table.Tr>
                     );
                 })}

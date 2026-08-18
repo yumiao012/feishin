@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -6,14 +7,14 @@ import {
 } from '/@/renderer/features/settings/components/settings-section';
 import { Switch } from '/@/shared/components/switch/switch';
 
-export const AnalyticsSettings = () => {
+export const AnalyticsSettings = memo(() => {
     const { t } = useTranslation();
 
-    const handleToggleAnalytics = (disable: boolean) => {
-        if (disable) {
-            localStorage.setItem('umami.disabled', '1');
-        } else {
+    const handleSetSendAnalytics = (send: boolean) => {
+        if (send) {
             localStorage.removeItem('umami.disabled');
+        } else {
+            localStorage.setItem('umami.disabled', '1');
         }
     };
 
@@ -21,19 +22,15 @@ export const AnalyticsSettings = () => {
         {
             control: (
                 <Switch
-                    defaultChecked={localStorage.getItem('umami.disabled') === '1'}
-                    onChange={(e) => handleToggleAnalytics(e.currentTarget.checked)}
+                    aria-label={t('setting.analyticsEnable')}
+                    defaultChecked={localStorage.getItem('umami.disabled') !== '1'}
+                    onChange={(e) => handleSetSendAnalytics(e.currentTarget.checked)}
                 />
             ),
-            description: t('setting.analyticsDisable_description', { postProcess: 'sentenceCase' }),
-            title: t('setting.analyticsDisable', { postProcess: 'sentenceCase' }),
+            description: t('setting.analyticsEnable_description'),
+            title: t('setting.analyticsEnable'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={analyticsOptions}
-            title={t('page.setting.analytics', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={analyticsOptions} title={t('page.setting.analytics')} />;
+});

@@ -79,24 +79,22 @@ export const FavoritesHeader = ({ itemType }: FavoritesHeaderProps) => {
                                     <Stack gap={0} style={{ cursor: 'pointer' }}>
                                         <Group>
                                             <TextTitle isNoSelect order={3}>
-                                                {t('page.favorites.title', {
-                                                    postProcess: 'sentenceCase',
-                                                })}
+                                                {t('page.favorites.title')}
                                             </TextTitle>
                                             <Icon icon="dropdown" size="xl" />
                                         </Group>
                                         <Text isMuted size="sm">
                                             {itemType === LibraryItem.ALBUM &&
-                                                t('entity.album_other', {
-                                                    postProcess: 'sentenceCase',
+                                                t('entity.album', {
+                                                    count: 2,
                                                 })}
                                             {itemType === LibraryItem.ALBUM_ARTIST &&
-                                                t('entity.artist_other', {
-                                                    postProcess: 'sentenceCase',
+                                                t('entity.artist', {
+                                                    count: 2,
                                                 })}
                                             {itemType === LibraryItem.SONG &&
-                                                t('entity.track_other', {
-                                                    postProcess: 'sentenceCase',
+                                                t('entity.track', {
+                                                    count: 2,
                                                 })}
                                         </Text>
                                     </Stack>
@@ -107,14 +105,18 @@ export const FavoritesHeader = ({ itemType }: FavoritesHeaderProps) => {
                                         leftSection={<Icon icon="track" size="xl" />}
                                         onClick={() => handleItemTypeChange(LibraryItem.SONG)}
                                     >
-                                        {t('entity.track_other', { postProcess: 'sentenceCase' })}
+                                        {t('entity.track', {
+                                            count: 2,
+                                        })}
                                     </DropdownMenu.Item>
                                     <DropdownMenu.Item
                                         isSelected={itemType === LibraryItem.ALBUM}
                                         leftSection={<Icon icon="album" size="xl" />}
                                         onClick={() => handleItemTypeChange(LibraryItem.ALBUM)}
                                     >
-                                        {t('entity.album_other', { postProcess: 'sentenceCase' })}
+                                        {t('entity.album', {
+                                            count: 2,
+                                        })}
                                     </DropdownMenu.Item>
                                     <DropdownMenu.Item
                                         isSelected={itemType === LibraryItem.ALBUM_ARTIST}
@@ -123,7 +125,9 @@ export const FavoritesHeader = ({ itemType }: FavoritesHeaderProps) => {
                                             handleItemTypeChange(LibraryItem.ALBUM_ARTIST)
                                         }
                                     >
-                                        {t('entity.artist_other', { postProcess: 'sentenceCase' })}
+                                        {t('entity.artist', {
+                                            count: 2,
+                                        })}
                                     </DropdownMenu.Item>
                                 </DropdownMenu.Dropdown>
                             </DropdownMenu>

@@ -26,6 +26,7 @@ export enum ItemListKey {
     GENRE_ALBUM = 'genreAlbum',
     GENRE_SONG = 'genreSong',
     PLAYLIST = LibraryItem.PLAYLIST,
+    PLAYLIST_ALBUM = 'playlistAlbum',
     PLAYLIST_SONG = LibraryItem.PLAYLIST_SONG,
     QUEUE_SONG = LibraryItem.QUEUE_SONG,
     RADIO = 'radio',
@@ -34,6 +35,7 @@ export enum ItemListKey {
 }
 
 export enum ListDisplayType {
+    DETAIL = 'detail',
     GRID = 'poster',
     LIST = 'list',
     TABLE = 'table',
@@ -101,6 +103,10 @@ export enum AuthState {
 }
 
 export enum CrossfadeStyle {
+    CONSTANT_POWER = 'constantPower',
+    CONSTANT_POWER_SLOW_CUT = 'constantPowerSlowCut',
+    CONSTANT_POWER_SLOW_FADE = 'constantPowerSlowFade',
+    DIPPED = 'dipped',
     EQUAL_POWER = 'equalPower',
     EXPONENTIAL = 'exponential',
     LINEAR = 'linear',
@@ -143,6 +149,7 @@ export enum PlayerShuffle {
 export enum PlayerStatus {
     PAUSED = 'paused',
     PLAYING = 'playing',
+    STOPPED = 'stopped',
 }
 
 export enum PlayerStyle {
@@ -151,6 +158,7 @@ export enum PlayerStyle {
 }
 
 export enum PlayerType {
+    JUKEBOX = 'jukebox',
     LOCAL = 'local',
     WEB = 'web',
 }
@@ -160,6 +168,7 @@ export enum TableColumn {
     ALBUM = 'album',
     ALBUM_ARTIST = 'albumArtists',
     ALBUM_COUNT = 'albumCount',
+    ALBUM_GROUP = 'albumGroup',
     ARTIST = 'artists',
     BIOGRAPHY = 'biography',
     BIT_DEPTH = 'bitDepth',
@@ -168,6 +177,8 @@ export enum TableColumn {
     CHANNELS = 'channels',
     CODEC = 'container',
     COMMENT = 'comment',
+    COMPOSER = 'composer',
+    DATE = 'date',
     DATE_ADDED = 'createdAt',
     DISC_NUMBER = 'discNumber',
     DURATION = 'duration',
@@ -176,22 +187,25 @@ export enum TableColumn {
     ID = 'id',
     IMAGE = 'imageUrl',
     LAST_PLAYED = 'lastPlayedAt',
+    LAYOUT_FILL = '__layoutFill',
     OWNER = 'username',
     PATH = 'path',
     PLAY_COUNT = 'playCount',
     PLAYLIST_REORDER = 'playlistReorder',
     RELEASE_DATE = 'releaseDate',
+    RELEASE_YEAR = 'releaseYear',
     ROW_INDEX = 'rowIndex',
     SAMPLE_RATE = 'sampleRate',
     SIZE = 'size',
     SKIP = 'skip',
     SONG_COUNT = 'songCount',
     TITLE = 'name',
+    TITLE_ARTIST = 'titleArtist',
     TITLE_COMBINED = 'titleCombined',
     TRACK_NUMBER = 'trackNumber',
     USER_FAVORITE = 'userFavorite',
     USER_RATING = 'userRating',
-    YEAR = 'releaseYear',
+    YEAR = 'year',
 }
 
 export type DiscoveredServerItem = {
@@ -250,6 +264,8 @@ export type ServerListItem = {
     id: string;
     name: string;
     ndCredential?: string;
+    preferRemoteUrl?: boolean;
+    remoteUrl?: string;
     savePassword?: boolean;
     type: ServerType;
     url: string;
@@ -276,5 +292,11 @@ export interface UniqueId {
 
 export type WebAudio = {
     context: AudioContext;
+    dsp: null | {
+        compressor: DynamicsCompressorNode;
+        eqFilters: BiquadFilterNode[];
+        preampGain: GainNode;
+    };
     gains: GainNode[];
+    visualizerInputs?: AudioNode[];
 };

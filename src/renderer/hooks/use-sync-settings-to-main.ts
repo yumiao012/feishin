@@ -4,9 +4,7 @@ import { useEffect, useRef } from 'react';
 import i18n from '/@/i18n/i18n';
 import { openRestartRequiredToast } from '/@/renderer/features/settings/restart-toast';
 import { useSettingsStore } from '/@/renderer/store/settings.store';
-import { logFn } from '/@/renderer/utils/logger';
-import { logMsg } from '/@/renderer/utils/logger-message';
-
+import { logger } from '/@/renderer/utils/logger';
 // Synchronizes settings from the renderer store to the main process electron store
 // on app initialization. If there are differences, it updates the main store and shows
 // a restart required toast.
@@ -32,6 +30,7 @@ export const useSyncSettingsToMain = () => {
             const settingsFromStore = useSettingsStore.getState();
 
             const settings = {
+                font: settingsFromStore.font,
                 general: settingsFromStore.general,
                 hotkeys: settingsFromStore.hotkeys,
                 lyrics: settingsFromStore.lyrics,
@@ -42,12 +41,15 @@ export const useSyncSettingsToMain = () => {
             hasRunRef.current = true;
 
             const localSettings = window.api.localSettings;
-            let hasDifferences = false;
 
             const settingsMappings: Array<{
                 mainStoreKey: string;
                 rendererValue: any;
             }> = [
+                {
+                    mainStoreKey: 'lyrics',
+                    rendererValue: settings.lyrics.sources,
+                },
                 {
                     mainStoreKey: 'window_window_bar_style',
                     rendererValue: settings.window.windowBarStyle,
@@ -98,37 +100,46 @@ export const useSyncSettingsToMain = () => {
                     mainStoreKey: 'enableNeteaseTranslation',
                     rendererValue: settings.lyrics.enableNeteaseTranslation,
                 },
+                {
+                    mainStoreKey: 'local_font_path',
+                    rendererValue: settings.font.custom,
+                },
             ];
 
             // Compare and sync each setting
-            for (const mapping of settingsMappings) {
-                const mainValue = localSettings.get(mapping.mainStoreKey);
-                const rendererValue = mapping.rendererValue;
+            (async () => {
+                let hasDifferences = false;
 
-                const mainValueNormalized = mainValue === undefined ? null : mainValue;
-                const rendererValueNormalized = rendererValue === undefined ? null : rendererValue;
+                for (const mapping of settingsMappings) {
+                    const mainValue = await localSettings.get(mapping.mainStoreKey);
+                    const rendererValue = mapping.rendererValue;
 
-                if (
-                    JSON.stringify(mainValueNormalized) !== JSON.stringify(rendererValueNormalized)
-                ) {
-                    hasDifferences = true;
-                    logFn.warn(logMsg.system.settingsSynchronized, {
-                        meta: {
-                            mainStoreKey: mapping.mainStoreKey,
-                            mainValue: mainValueNormalized,
-                            rendererValue: rendererValueNormalized,
-                        },
-                    });
-                    localSettings.set(mapping.mainStoreKey, rendererValue);
+                    const mainValueNormalized = mainValue === undefined ? null : mainValue;
+                    const rendererValueNormalized =
+                        rendererValue === undefined ? null : rendererValue;
+
+                    if (
+                        JSON.stringify(mainValueNormalized) !==
+                        JSON.stringify(rendererValueNormalized)
+                    ) {
+                        hasDifferences = true;
+                        logger.warn(
+                            'Differences found between renderer and main process settings',
+                            {
+                                mainStoreKey: mapping.mainStoreKey,
+                                mainValue: mainValueNormalized,
+                                rendererValue: rendererValueNormalized,
+                            },
+                        );
+                        localSettings.set(mapping.mainStoreKey, rendererValue);
+                    }
                 }
-            }
 
-            // Show restart toast if there were differences
-            if (hasDifferences) {
-                openRestartRequiredToast(
-                    i18n.t('error.settingsSyncError', { postProcess: 'sentenceCase' }),
-                );
-            }
+                // Show restart toast if there were differences
+                if (hasDifferences) {
+                    openRestartRequiredToast(i18n.t('error.settingsSyncError'));
+                }
+            })();
         }, 5000);
 
         return () => {

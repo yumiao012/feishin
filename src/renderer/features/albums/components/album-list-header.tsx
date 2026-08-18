@@ -2,6 +2,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { Suspense, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useIsFetchingItemListCount } from '/@/renderer/components/item-list/helpers/use-is-fetching-item-list';
 import { PageHeader } from '/@/renderer/components/page-header/page-header';
 import { useListContext } from '/@/renderer/context/list-context';
 import { AlbumListHeaderFilters } from '/@/renderer/features/albums/components/album-list-header-filters';
@@ -22,17 +23,13 @@ interface AlbumListHeaderProps {
 }
 
 export const AlbumListHeader = ({ title }: AlbumListHeaderProps) => {
-    const { itemCount } = useListContext();
-
     return (
         <Stack gap={0}>
             <PageHeader>
                 <LibraryHeaderBar ignoreMaxWidth>
                     <PlayButton />
                     <PageTitle title={title} />
-                    <LibraryHeaderBar.Badge isLoading={!itemCount}>
-                        {itemCount}
-                    </LibraryHeaderBar.Badge>
+                    <AlbumListHeaderBadge />
                 </LibraryHeaderBar>
                 <Group>
                     <ListSearchInput />
@@ -45,10 +42,20 @@ export const AlbumListHeader = ({ title }: AlbumListHeaderProps) => {
     );
 };
 
+const AlbumListHeaderBadge = () => {
+    const { itemCount } = useListContext();
+
+    const isFetching = useIsFetchingItemListCount({
+        itemType: LibraryItem.ALBUM,
+    });
+
+    return <LibraryHeaderBar.Badge isLoading={isFetching}>{itemCount}</LibraryHeaderBar.Badge>;
+};
+
 const PageTitle = ({ title }: { title?: string }) => {
     const { t } = useTranslation();
     const { pageKey } = useListContext();
-    const pageTitle = title || t('page.albumList.title', { postProcess: 'titleCase' });
+    const pageTitle = title || t('page.albumList.title');
 
     switch (pageKey) {
         case ItemListKey.ALBUM_ARTIST_ALBUM:

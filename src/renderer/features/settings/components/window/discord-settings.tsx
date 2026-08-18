@@ -1,4 +1,5 @@
 import isElectron from 'is-electron';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -16,7 +17,7 @@ import { Select } from '/@/shared/components/select/select';
 import { Switch } from '/@/shared/components/switch/switch';
 import { TextInput } from '/@/shared/components/text-input/text-input';
 
-export const DiscordSettings = () => {
+export const DiscordSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useDiscordSettings();
     const generalSettings = useGeneralSettings();
@@ -30,7 +31,6 @@ export const DiscordSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             discord: {
-                                ...settings,
                                 enabled: e.currentTarget.checked,
                             },
                         });
@@ -43,12 +43,10 @@ export const DiscordSettings = () => {
                 icon: 'icon',
                 paused: 'paused',
                 playing: 'playing',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.discordRichPresence', {
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
         },
         {
@@ -58,7 +56,6 @@ export const DiscordSettings = () => {
                     onBlur={(e) => {
                         setSettings({
                             discord: {
-                                ...settings,
                                 clientId: e.currentTarget.value,
                             },
                         });
@@ -69,12 +66,10 @@ export const DiscordSettings = () => {
                 context: 'description',
                 defaultId: '1165957668758900787',
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.discordApplicationId', {
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
         },
         {
@@ -84,7 +79,6 @@ export const DiscordSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             discord: {
-                                ...settings,
                                 showPaused: e.currentTarget.checked,
                             },
                         });
@@ -93,12 +87,28 @@ export const DiscordSettings = () => {
             ),
             description: t('setting.discordPausedStatus', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.discordPausedStatus', {
-                postProcess: 'sentenceCase',
+            title: t('setting.discordPausedStatus'),
+        },
+        {
+            control: (
+                <Switch
+                    checked={settings.showStateIcon}
+                    onChange={(e) => {
+                        setSettings({
+                            discord: {
+                                showStateIcon: e.currentTarget.checked,
+                            },
+                        });
+                    }}
+                />
+            ),
+            description: t('setting.discordStateIcon', {
+                context: 'description',
             }),
+            isHidden: !isElectron(),
+            title: t('setting.discordStateIcon'),
         },
         {
             control: (
@@ -107,7 +117,6 @@ export const DiscordSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             discord: {
-                                ...settings,
                                 showAsListening: e.currentTarget.checked,
                             },
                         });
@@ -116,12 +125,9 @@ export const DiscordSettings = () => {
             ),
             description: t('setting.discordListening', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.discordListening', {
-                postProcess: 'sentenceCase',
-            }),
+            title: t('setting.discordListening'),
         },
         {
             control: (
@@ -133,14 +139,12 @@ export const DiscordSettings = () => {
                         {
                             label: t('setting.discordDisplayType', {
                                 context: 'songname',
-                                postProcess: 'sentenceCase',
                             }),
                             value: DiscordDisplayType.SONG_NAME,
                         },
                         {
                             label: t('setting.discordDisplayType_artistname', {
                                 context: 'artistname',
-                                postProcess: 'sentenceCase',
                             }),
                             value: DiscordDisplayType.ARTIST_NAME,
                         },
@@ -150,7 +154,6 @@ export const DiscordSettings = () => {
                         if (!e) return;
                         setSettings({
                             discord: {
-                                ...settings,
                                 displayType: e as DiscordDisplayType,
                             },
                         });
@@ -159,13 +162,11 @@ export const DiscordSettings = () => {
             ),
             description: t('setting.discordDisplayType', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.discordDisplayType', {
                 discord: 'Discord',
                 musicbrainz: 'musicbrainz',
-                postProcess: 'sentenceCase',
             }),
         },
         {
@@ -175,9 +176,7 @@ export const DiscordSettings = () => {
                     clearable={false}
                     data={[
                         {
-                            label: t('setting.discordLinkType_none', {
-                                postProcess: 'sentenceCase',
-                            }),
+                            label: t('setting.discordLinkType_none'),
                             value: DiscordLinkType.NONE,
                         },
                         { label: 'last.fm', value: DiscordLinkType.LAST_FM },
@@ -195,7 +194,6 @@ export const DiscordSettings = () => {
                         if (!e) return;
                         setSettings({
                             discord: {
-                                ...settings,
                                 linkType: e as DiscordLinkType,
                             },
                         });
@@ -207,12 +205,10 @@ export const DiscordSettings = () => {
                 discord: 'Discord',
                 lastfm: 'last.fm',
                 musicbrainz: 'musicbrainz',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.discordLinkType', {
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
         },
         {
@@ -222,7 +218,6 @@ export const DiscordSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             discord: {
-                                ...settings,
                                 showServerImage: e.currentTarget.checked,
                             },
                         });
@@ -233,12 +228,10 @@ export const DiscordSettings = () => {
                 context: 'description',
 
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.discordServeImage', {
                 discord: 'Discord',
-                postProcess: 'sentenceCase',
             }),
         },
         {
@@ -248,7 +241,6 @@ export const DiscordSettings = () => {
                     onBlur={(e) => {
                         setSettings({
                             general: {
-                                ...generalSettings,
                                 lastfmApiKey: e.currentTarget.value,
                             },
                         });
@@ -258,20 +250,13 @@ export const DiscordSettings = () => {
             description: t('setting.lastfmApiKey', {
                 context: 'description',
                 lastfm: 'Last.fm',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
             title: t('setting.lastfmApiKey', {
                 lastfm: 'Last.fm',
-                postProcess: 'sentenceCase',
             }),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={discordOptions}
-            title={t('page.setting.discord', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={discordOptions} title={t('page.setting.discord')} />;
+});

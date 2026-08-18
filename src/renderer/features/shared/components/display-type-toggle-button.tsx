@@ -16,18 +16,21 @@ export const DisplayTypeToggleButton = ({
 }: DisplayTypeToggleButtonProps) => {
     const { t } = useTranslation();
     const isGrid = displayType === ListDisplayType.GRID;
+    const isDetail = displayType === ListDisplayType.DETAIL;
 
     return (
         <ActionIcon
-            icon={isGrid ? 'layoutGrid' : 'layoutTable'}
+            icon={isGrid ? 'layoutGrid' : isDetail ? 'layoutDetail' : 'layoutTable'}
             iconProps={{
                 size: 'lg',
             }}
             onClick={onToggle}
             tooltip={{
                 label: isGrid
-                    ? t('table.config.view.grid', { postProcess: 'sentenceCase' })
-                    : t('table.config.view.table', { postProcess: 'sentenceCase' }),
+                    ? t('table.config.view.grid')
+                    : isDetail
+                      ? t('table.config.view.detail')
+                      : t('table.config.view.table'),
             }}
             variant="subtle"
             {...buttonProps}

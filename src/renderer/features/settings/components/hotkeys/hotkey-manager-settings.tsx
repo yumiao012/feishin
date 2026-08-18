@@ -1,6 +1,6 @@
 import isElectron from 'is-electron';
 import debounce from 'lodash/debounce';
-import { ChangeEvent, KeyboardEvent, useCallback, useMemo, useState } from 'react';
+import { ChangeEvent, KeyboardEvent, memo, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import styles from './hotkeys-manager-settings.module.css';
@@ -15,97 +15,102 @@ import { useSettingSearchContext } from '/@/renderer/features/settings/context/s
 import { BindingActions, useHotkeySettings, useSettingsStoreActions } from '/@/renderer/store';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
-import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
+import { Table } from '/@/shared/components/table/table';
 import { TextInput } from '/@/shared/components/text-input/text-input';
+import {
+    keyboardCodeToHotkeyKey,
+    MODIFIER_KEY_CODES,
+} from '/@/shared/utils/keyboard-code-to-hotkey';
 
 const ipc = isElectron() ? window.api.ipc : null;
 
 const BINDINGS_MAP: Record<BindingActions, string> = {
-    browserBack: i18n.t('setting.hotkey', { context: 'browserBack', postProcess: 'sentenceCase' }),
+    browserBack: i18n.t('setting.hotkey', { context: 'browserBack' }),
     browserForward: i18n.t('setting.hotkey', {
         context: 'browserForward',
-        postProcess: 'sentenceCase',
     }),
     favoriteCurrentAdd: i18n.t('setting.hotkey', {
         context: 'favoriteCurrentSong',
-        postProcess: 'sentenceCase',
     }),
     favoriteCurrentRemove: i18n.t('setting.hotkey', {
         context: 'unfavoriteCurrentSong',
-        postProcess: 'sentenceCase',
     }),
     favoriteCurrentToggle: i18n.t('setting.hotkey', {
         context: 'toggleCurrentSongFavorite',
-        postProcess: 'sentenceCase',
     }),
     favoritePreviousAdd: i18n.t('setting.hotkey', {
         context: 'favoritePreviousSong',
-        postProcess: 'sentenceCase',
     }),
     favoritePreviousRemove: i18n.t('setting.hotkey', {
         context: 'unfavoritePreviousSong',
-        postProcess: 'sentenceCase',
     }),
     favoritePreviousToggle: i18n.t('setting.hotkey', {
         context: 'togglePreviousSongFavorite',
-        postProcess: 'sentenceCase',
     }),
     globalSearch: i18n.t('setting.hotkey', {
         context: 'globalSearch',
-        postProcess: 'sentenceCase',
     }),
-    localSearch: i18n.t('setting.hotkey', { context: 'localSearch', postProcess: 'sentenceCase' }),
+    listNavigateToPage: i18n.t('setting.hotkey', {
+        context: 'listNavigateToPage',
+    }),
+    listPlayDefault: i18n.t('setting.hotkey', {
+        context: 'listPlayDefault',
+    }),
+    listPlayLast: i18n.t('setting.hotkey', {
+        context: 'listPlayLast',
+    }),
+    listPlayNext: i18n.t('setting.hotkey', {
+        context: 'listPlayNext',
+    }),
+    listPlayNow: i18n.t('setting.hotkey', { context: 'listPlayNow' }),
+    listShowPlayingSong: i18n.t('setting.hotkey', { context: 'listShowPlayingSong' }),
+    localSearch: i18n.t('setting.hotkey', { context: 'localSearch' }),
     navigateHome: i18n.t('setting.hotkey', {
         context: 'navigateHome',
-        postProcess: 'sentenceCase',
     }),
-    next: i18n.t('setting.hotkey', { context: 'playbackNext', postProcess: 'sentenceCase' }),
-    pause: i18n.t('setting.hotkey', { context: 'playbackPause', postProcess: 'sentenceCase' }),
-    play: i18n.t('setting.hotkey', { context: 'playbackPlay', postProcess: 'sentenceCase' }),
+    next: i18n.t('setting.hotkey', { context: 'playbackNext' }),
+    nextAlbum: i18n.t('setting.hotkey', { context: 'playbackNextAlbum' }),
+    pause: i18n.t('setting.hotkey', { context: 'playbackPause' }),
+    play: i18n.t('setting.hotkey', { context: 'playbackPlay' }),
     playPause: i18n.t('setting.hotkey', {
         context: 'playbackPlayPause',
-        postProcess: 'sentenceCase',
     }),
     previous: i18n.t('setting.hotkey', {
         context: 'playbackPrevious',
-        postProcess: 'sentenceCase',
     }),
-    rate0: i18n.t('setting.hotkey', { context: 'rate0', postProcess: 'sentenceCase' }),
-    rate1: i18n.t('setting.hotkey', { context: 'rate1', postProcess: 'sentenceCase' }),
-    rate2: i18n.t('setting.hotkey', { context: 'rate2', postProcess: 'sentenceCase' }),
-    rate3: i18n.t('setting.hotkey', { context: 'rate3', postProcess: 'sentenceCase' }),
-    rate4: i18n.t('setting.hotkey', { context: 'rate4', postProcess: 'sentenceCase' }),
-    rate5: i18n.t('setting.hotkey', { context: 'rate5', postProcess: 'sentenceCase' }),
+    previousAlbum: i18n.t('setting.hotkey', { context: 'playbackPreviousAlbum' }),
+    rate0: i18n.t('setting.hotkey', { context: 'rate0' }),
+    rate1: i18n.t('setting.hotkey', { context: 'rate1' }),
+    rate2: i18n.t('setting.hotkey', { context: 'rate2' }),
+    rate3: i18n.t('setting.hotkey', { context: 'rate3' }),
+    rate4: i18n.t('setting.hotkey', { context: 'rate4' }),
+    rate5: i18n.t('setting.hotkey', { context: 'rate5' }),
     skipBackward: i18n.t('setting.hotkey', {
         context: 'skipBackward',
-        postProcess: 'sentenceCase',
     }),
-    skipForward: i18n.t('setting.hotkey', { context: 'skipForward', postProcess: 'sentenceCase' }),
-    stop: i18n.t('setting.hotkey', { context: 'playbackStop', postProcess: 'sentenceCase' }),
+    skipForward: i18n.t('setting.hotkey', { context: 'skipForward' }),
+    stop: i18n.t('setting.hotkey', { context: 'playbackStop' }),
     toggleFullscreenPlayer: i18n.t('setting.hotkey', {
         context: 'toggleFullScreenPlayer',
-        postProcess: 'sentenceCase',
     }),
-    toggleQueue: i18n.t('setting.hotkey', { context: 'toggleQueue', postProcess: 'sentenceCase' }),
+    toggleQueue: i18n.t('setting.hotkey', { context: 'toggleQueue' }),
     toggleRepeat: i18n.t('setting.hotkey', {
         context: 'toggleRepeat',
-        postProcess: 'sentenceCase',
     }),
     toggleShuffle: i18n.t('setting.hotkey', {
         context: 'toggleShuffle',
-        postProcess: 'sentenceCase',
     }),
-    volumeDown: i18n.t('setting.hotkey', { context: 'volumeDown', postProcess: 'sentenceCase' }),
-    volumeMute: i18n.t('setting.hotkey', { context: 'volumeMute', postProcess: 'sentenceCase' }),
-    volumeUp: i18n.t('setting.hotkey', { context: 'volumeUp', postProcess: 'sentenceCase' }),
-    zoomIn: i18n.t('setting.hotkey', { context: 'zoomIn', postProcess: 'sentenceCase' }),
-    zoomOut: i18n.t('setting.hotkey', { context: 'zoomOut', postProcess: 'sentenceCase' }),
+    volumeDown: i18n.t('setting.hotkey', { context: 'volumeDown' }),
+    volumeMute: i18n.t('setting.hotkey', { context: 'volumeMute' }),
+    volumeUp: i18n.t('setting.hotkey', { context: 'volumeUp' }),
+    zoomIn: i18n.t('setting.hotkey', { context: 'zoomIn' }),
+    zoomOut: i18n.t('setting.hotkey', { context: 'zoomOut' }),
 };
 
-export const HotkeyManagerSettings = () => {
+export const HotkeyManagerSettings = memo(() => {
     const { t } = useTranslation();
-    const { bindings, globalMediaHotkeys } = useHotkeySettings();
+    const { bindings } = useHotkeySettings();
     const { setSettings } = useSettingsStoreActions();
     const [selected, setSelected] = useState<BindingActions | null>(null);
     const keyword = useSettingSearchContext();
@@ -113,25 +118,16 @@ export const HotkeyManagerSettings = () => {
     const debouncedSetHotkey = debounce(
         (binding: BindingActions, e: KeyboardEvent<HTMLInputElement>) => {
             e.preventDefault();
-            const IGNORED_KEYS = ['Control', 'Alt', 'Shift', 'Meta', ' ', 'Escape'];
             const keys: string[] = [];
             if (e.ctrlKey) keys.push('mod');
             if (e.altKey) keys.push('alt');
             if (e.shiftKey) keys.push('shift');
             if (e.metaKey) keys.push('meta');
-            if (e.key === ' ') keys.push('space');
-            if (!IGNORED_KEYS.includes(e.key)) {
-                if (e.code.includes('Numpad')) {
-                    if (e.key === '+') keys.push('numpadadd');
-                    else if (e.key === '-') keys.push('numpadsubtract');
-                    else if (e.key === '*') keys.push('numpadmultiply');
-                    else if (e.key === '/') keys.push('numpaddivide');
-                    else if (e.key === '.') keys.push('numpaddecimal');
-                    else keys.push(`numpad${e.key}`.toLowerCase());
-                } else if (e.key === '+') {
-                    keys.push('equal');
-                } else {
-                    keys.push(e.key?.toLowerCase());
+
+            if (!MODIFIER_KEY_CODES.has(e.code) && e.code !== 'Escape') {
+                const hotkeyKey = keyboardCodeToHotkeyKey(e.code);
+                if (hotkeyKey) {
+                    keys.push(hotkeyKey);
                 }
             }
 
@@ -145,7 +141,6 @@ export const HotkeyManagerSettings = () => {
             setSettings({
                 hotkeys: {
                     bindings: updatedBindings,
-                    globalMediaHotkeys,
                 },
             });
 
@@ -171,13 +166,12 @@ export const HotkeyManagerSettings = () => {
             setSettings({
                 hotkeys: {
                     bindings: updatedBindings,
-                    globalMediaHotkeys,
                 },
             });
 
             ipc?.send('set-global-shortcuts', updatedBindings);
         },
-        [bindings, globalMediaHotkeys, setSettings],
+        [bindings, setSettings],
     );
 
     const handleClearHotkey = useCallback(
@@ -190,13 +184,12 @@ export const HotkeyManagerSettings = () => {
             setSettings({
                 hotkeys: {
                     bindings: updatedBindings,
-                    globalMediaHotkeys,
                 },
             });
 
             ipc?.send('set-global-shortcuts', updatedBindings);
         },
-        [bindings, globalMediaHotkeys, setSettings],
+        [bindings, setSettings],
     );
 
     const duplicateHotkeyMap = useMemo(() => {
@@ -246,87 +239,112 @@ export const HotkeyManagerSettings = () => {
                         control={<></>}
                         description={t('setting.applicationHotkeys', {
                             context: 'description',
-                            postProcess: 'sentenceCase',
                         })}
-                        title={t('setting.applicationHotkeys', { postProcess: 'sentenceCase' })}
+                        title={t('setting.applicationHotkeys')}
                     />
                     <div className={styles.container}>
-                        {filteredBindings.map((binding) => (
-                            <Group key={`hotkey-${binding}`} wrap="nowrap">
-                                <TextInput
-                                    readOnly
-                                    style={{ userSelect: 'none' }}
-                                    value={BINDINGS_MAP[binding as keyof typeof BINDINGS_MAP]}
-                                />
-                                <TextInput
-                                    id={`hotkey-${binding}`}
-                                    leftSection={<Icon icon="keyboard" />}
-                                    onBlur={() => setSelected(null)}
-                                    onChange={() => {}}
-                                    onKeyDownCapture={(e) => {
-                                        if (selected !== (binding as BindingActions)) return;
-                                        handleSetHotkey(binding as BindingActions, e);
-                                    }}
-                                    readOnly
-                                    rightSection={
-                                        <ActionIcon
-                                            icon="edit"
-                                            onClick={() => {
-                                                setSelected(binding as BindingActions);
-                                                document
-                                                    .getElementById(`hotkey-${binding}`)
-                                                    ?.focus();
-                                            }}
-                                            variant="transparent"
-                                        />
-                                    }
-                                    style={{
-                                        opacity: selected === (binding as BindingActions) ? 0.8 : 1,
-                                        outline: duplicateHotkeyMap.includes(
-                                            bindings[binding as keyof typeof BINDINGS_MAP].hotkey!,
-                                        )
-                                            ? '1px dashed red'
-                                            : undefined,
-                                    }}
-                                    value={bindings[binding as keyof typeof BINDINGS_MAP].hotkey}
-                                />
-                                {isElectron() && (
-                                    <Checkbox
-                                        checked={
-                                            bindings[binding as keyof typeof BINDINGS_MAP].isGlobal
-                                        }
-                                        disabled={
-                                            bindings[binding as keyof typeof BINDINGS_MAP]
-                                                .hotkey === ''
-                                        }
-                                        onChange={(e) =>
-                                            handleSetGlobalHotkey(binding as BindingActions, e)
-                                        }
-                                        size="md"
-                                        style={{
-                                            opacity: bindings[binding as keyof typeof BINDINGS_MAP]
-                                                .allowGlobal
-                                                ? 1
-                                                : 0,
-                                        }}
-                                    />
-                                )}
-                                {bindings[binding as keyof typeof BINDINGS_MAP].hotkey && (
-                                    <ActionIcon
-                                        icon="x"
-                                        iconProps={{
-                                            color: 'error',
-                                        }}
-                                        onClick={() => handleClearHotkey(binding as BindingActions)}
-                                        variant="transparent"
-                                    />
-                                )}
-                            </Group>
-                        ))}
+                        <Table withColumnBorders withRowBorders>
+                            <Table.Tbody>
+                                {filteredBindings.map((binding) => (
+                                    <Table.Tr key={`hotkey-${binding}`}>
+                                        <Table.Td style={{ userSelect: 'none' }}>
+                                            {BINDINGS_MAP[binding as keyof typeof BINDINGS_MAP]}
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <TextInput
+                                                id={`hotkey-${binding}`}
+                                                leftSection={<Icon icon="keyboard" />}
+                                                onBlur={() => setSelected(null)}
+                                                onChange={() => {}}
+                                                onKeyDownCapture={(e) => {
+                                                    if (selected !== (binding as BindingActions))
+                                                        return;
+                                                    handleSetHotkey(binding as BindingActions, e);
+                                                }}
+                                                readOnly
+                                                rightSection={
+                                                    <ActionIcon
+                                                        icon="edit"
+                                                        onClick={() => {
+                                                            setSelected(binding as BindingActions);
+                                                            document
+                                                                .getElementById(`hotkey-${binding}`)
+                                                                ?.focus();
+                                                        }}
+                                                        variant="transparent"
+                                                    />
+                                                }
+                                                style={{
+                                                    opacity:
+                                                        selected === (binding as BindingActions)
+                                                            ? 0.8
+                                                            : 1,
+                                                    outline: duplicateHotkeyMap.includes(
+                                                        bindings[
+                                                            binding as keyof typeof BINDINGS_MAP
+                                                        ].hotkey!,
+                                                    )
+                                                        ? '1px dashed red'
+                                                        : undefined,
+                                                }}
+                                                value={
+                                                    bindings[binding as keyof typeof BINDINGS_MAP]
+                                                        .hotkey
+                                                }
+                                            />
+                                        </Table.Td>
+                                        {isElectron() && (
+                                            <Table.Td>
+                                                <Checkbox
+                                                    checked={
+                                                        bindings[
+                                                            binding as keyof typeof BINDINGS_MAP
+                                                        ].isGlobal
+                                                    }
+                                                    disabled={
+                                                        bindings[
+                                                            binding as keyof typeof BINDINGS_MAP
+                                                        ].hotkey === ''
+                                                    }
+                                                    onChange={(e) =>
+                                                        handleSetGlobalHotkey(
+                                                            binding as BindingActions,
+                                                            e,
+                                                        )
+                                                    }
+                                                    size="md"
+                                                    style={{
+                                                        opacity: bindings[
+                                                            binding as keyof typeof BINDINGS_MAP
+                                                        ].allowGlobal
+                                                            ? 1
+                                                            : 0,
+                                                    }}
+                                                />
+                                            </Table.Td>
+                                        )}
+                                        {bindings[binding as keyof typeof BINDINGS_MAP].hotkey && (
+                                            <Table.Td>
+                                                <ActionIcon
+                                                    icon="x"
+                                                    iconProps={{
+                                                        color: 'error',
+                                                    }}
+                                                    onClick={() =>
+                                                        handleClearHotkey(binding as BindingActions)
+                                                    }
+                                                    variant="transparent"
+                                                />
+                                            </Table.Td>
+                                        )}
+                                    </Table.Tr>
+                                ))}
+                            </Table.Tbody>
+                        </Table>
                     </div>
                 </>
             }
             options={options}
         />
     );
-};
+});

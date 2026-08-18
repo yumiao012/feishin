@@ -31,6 +31,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
             <MantineNumberInput
                 classNames={{
                     control: styles.control,
+                    description: styles.description,
                     input: styles.input,
                     label: styles.label,
                     required: styles.required,
@@ -39,6 +40,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
                     wrapper: styles.wrapper,
                     ...classNames,
                 }}
+                defaultValue={defaultValue}
                 hideControls
                 onChange={
                     onChange

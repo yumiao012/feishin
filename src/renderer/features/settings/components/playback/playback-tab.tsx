@@ -1,8 +1,10 @@
 import isElectron from 'is-electron';
-import { lazy, Suspense, useMemo } from 'react';
+import { lazy, memo, Suspense, useMemo } from 'react';
+import { shallow } from 'zustand/shallow';
 
 import { AudioSettings } from '/@/renderer/features/settings/components/playback/audio-settings';
 import { AutoDJSettings } from '/@/renderer/features/settings/components/playback/auto-dj-settings';
+import { EqSettings } from '/@/renderer/features/settings/components/playback/eq-settings';
 import { PlayerFilterSettings } from '/@/renderer/features/settings/components/playback/player-filter-settings';
 import { TranscodeSettings } from '/@/renderer/features/settings/components/playback/transcode-settings';
 import { useSettingsStore } from '/@/renderer/store';
@@ -16,9 +18,14 @@ const MpvSettings = lazy(() =>
     }),
 );
 
-export const PlaybackTab = () => {
-    const audioType = useSettingsStore((state) => state.playback.type);
-    const useWebAudio = useSettingsStore((state) => state.playback.webAudio);
+export const PlaybackTab = memo(() => {
+    const { audioType, useWebAudio } = useSettingsStore(
+        (state) => ({
+            audioType: state.playback.type,
+            useWebAudio: state.playback.webAudio,
+        }),
+        shallow,
+    );
 
     const hasFancyAudio = useMemo(() => {
         return (
@@ -31,6 +38,7 @@ export const PlaybackTab = () => {
         <Stack gap="md">
             <AudioSettings />
             <Suspense fallback={<></>}>{hasFancyAudio && <MpvSettings />}</Suspense>
+            <EqSettings />
             <Divider />
             <TranscodeSettings />
             <Divider />
@@ -39,4 +47,4 @@ export const PlaybackTab = () => {
             <AutoDJSettings />
         </Stack>
     );
-};
+});

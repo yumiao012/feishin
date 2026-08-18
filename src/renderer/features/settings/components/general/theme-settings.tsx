@@ -1,26 +1,31 @@
 import isElectron from 'is-electron';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import i18n from '/@/i18n/i18n';
 import { StylesSettings } from '/@/renderer/features/settings/components/advanced/styles-settings';
+import { SettingsOptions } from '/@/renderer/features/settings/components/settings-option';
 import {
     SettingOption,
     SettingsSection,
 } from '/@/renderer/features/settings/components/settings-section';
+import { useCustomThemes, useCustomThemesStore } from '/@/renderer/store/custom-themes.store';
 import { useGeneralSettings, useSettingsStoreActions } from '/@/renderer/store/settings.store';
 import { THEME_DATA, useSetColorScheme } from '/@/renderer/themes/use-app-theme';
+import { Button } from '/@/shared/components/button/button';
 import { ColorInput } from '/@/shared/components/color-input/color-input';
 import { Group } from '/@/shared/components/group/group';
 import { Select } from '/@/shared/components/select/select';
+import { Slider } from '/@/shared/components/slider/slider';
 import { Stack } from '/@/shared/components/stack/stack';
 import { Switch } from '/@/shared/components/switch/switch';
+import { Text } from '/@/shared/components/text/text';
 import { getAppTheme } from '/@/shared/themes/app-theme';
 import { AppTheme } from '/@/shared/themes/app-theme-types';
 
 const localSettings = isElectron() ? window.api.localSettings : null;
 
-const getThemeSwatchColors = (theme: AppTheme) => {
+const getThemeSwatchColors = (theme: AppTheme | string) => {
     const themeConfig = getAppTheme(theme);
     return {
         background: themeConfig.colors?.background || 'rgb(0, 0, 0)',
@@ -33,21 +38,33 @@ const getThemeSwatchColors = (theme: AppTheme) => {
     };
 };
 
-const getGroupedThemeData = () => {
-    const darkThemes = THEME_DATA.filter((theme) => theme.type === 'dark').sort((a, b) =>
-        a.label.localeCompare(b.label),
-    );
-    const lightThemes = THEME_DATA.filter((theme) => theme.type === 'light').sort((a, b) =>
-        a.label.localeCompare(b.label),
-    );
+const getGroupedThemeData = (
+    customThemes: { error?: string; id: string; label: string; mode: 'dark' | 'light' }[],
+) => {
+    const customThemeData = customThemes
+        .filter((theme) => !theme.error)
+        .map((theme) => ({
+            label: theme.label,
+            type: theme.mode,
+            value: theme.id,
+        }));
+
+    const allThemes = [...THEME_DATA, ...customThemeData];
+
+    const darkThemes = allThemes
+        .filter((theme) => theme.type === 'dark')
+        .sort((a, b) => a.label.localeCompare(b.label));
+    const lightThemes = allThemes
+        .filter((theme) => theme.type === 'light')
+        .sort((a, b) => a.label.localeCompare(b.label));
 
     return [
         {
-            group: i18n.t('setting.themeDark', { postProcess: 'sentenceCase' }),
+            group: i18n.t('setting.themeDark'),
             items: darkThemes,
         },
         {
-            group: i18n.t('setting.themeLight', { postProcess: 'sentenceCase' }),
+            group: i18n.t('setting.themeLight'),
             items: lightThemes,
         },
     ];
@@ -69,8 +86,7 @@ const ColorSwatch = ({ color }: { color: string }) => {
 };
 
 const renderThemeOption = ({ option }: { option: { label: string; value: string } }) => {
-    const themeValue = option.value as AppTheme;
-    const colors = getThemeSwatchColors(themeValue);
+    const colors = getThemeSwatchColors(option.value);
 
     return (
         <Group gap="sm" style={{ alignItems: 'center', flex: 1 }}>
@@ -85,13 +101,101 @@ const renderThemeOption = ({ option }: { option: { label: string; value: string 
     );
 };
 
-export const ThemeSettings = () => {
+const CustomThemesManager = memo(() => {
+    const { t } = useTranslation();
+    const customThemes = useCustomThemes();
+    const { openThemesFolder, refresh } = useCustomThemesStore();
+
+    const erroredThemes = customThemes.filter((theme) => theme.error);
+    const warnedThemes = customThemes.filter((theme) => !theme.error && theme.warnings?.length);
+
+    return (
+        <>
+            <SettingsOptions
+                control={
+                    <Group gap="xs">
+                        <Button
+                            onClick={() => openThemesFolder()}
+                            size="compact-md"
+                            variant="subtle"
+                        >
+                            {t('common.openFolder', { postProcess: 'titleCase' })}
+                        </Button>
+                        <Button onClick={() => refresh()} size="compact-md" variant="subtle">
+                            {t('common.reload', {
+                                defaultValue: 'Reload',
+                                postProcess: 'titleCase',
+                            })}
+                        </Button>
+                    </Group>
+                }
+                description={t('setting.customThemes', {
+                    context: 'description',
+                })}
+                title={t('setting.customThemes')}
+            />
+            {erroredThemes.length > 0 && (
+                <SettingsOptions
+                    control={
+                        <Stack gap={4}>
+                            {erroredThemes.map((theme) => (
+                                <Text
+                                    isNoSelect
+                                    key={theme.id}
+                                    size="sm"
+                                    style={{ color: 'var(--theme-colors-state-error)' }}
+                                >
+                                    {theme.id}: {theme.error}
+                                </Text>
+                            ))}
+                        </Stack>
+                    }
+                    description={t('setting.customThemeErrors', {
+                        context: 'description',
+                    })}
+                    indent
+                    title={t('setting.customThemeErrors')}
+                />
+            )}
+            {warnedThemes.length > 0 && (
+                <SettingsOptions
+                    control={
+                        <Stack gap={4}>
+                            {warnedThemes.map((theme) => (
+                                <Stack gap={0} key={theme.id}>
+                                    {theme.warnings?.map((warning) => (
+                                        <Text
+                                            isNoSelect
+                                            key={warning}
+                                            size="sm"
+                                            style={{ color: 'var(--theme-colors-state-warning)' }}
+                                        >
+                                            {theme.id}: {warning}
+                                        </Text>
+                                    ))}
+                                </Stack>
+                            ))}
+                        </Stack>
+                    }
+                    description={t('setting.customThemeWarnings', {
+                        context: 'description',
+                    })}
+                    indent
+                    title={t('setting.customThemeWarnings')}
+                />
+            )}
+        </>
+    );
+});
+
+export const ThemeSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useGeneralSettings();
     const { setSettings } = useSettingsStoreActions();
     const { setColorScheme } = useSetColorScheme();
+    const customThemes = useCustomThemes();
 
-    const groupedThemeData = useMemo(() => getGroupedThemeData(), []);
+    const groupedThemeData = useMemo(() => getGroupedThemeData(customThemes), [customThemes]);
 
     const themeOptions: SettingOption[] = [
         {
@@ -101,7 +205,6 @@ export const ThemeSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             general: {
-                                ...settings,
                                 followSystemTheme: e.currentTarget.checked,
                             },
                         });
@@ -110,9 +213,7 @@ export const ThemeSettings = () => {
                             localSettings.themeSet(
                                 e.currentTarget.checked
                                     ? 'system'
-                                    : settings.theme === AppTheme.DEFAULT_DARK
-                                      ? 'dark'
-                                      : 'light',
+                                    : (getAppTheme(settings.theme).mode ?? 'dark'),
                             );
                         }
                     }}
@@ -120,10 +221,9 @@ export const ThemeSettings = () => {
             ),
             description: t('setting.useSystemTheme', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: false,
-            title: t('setting.useSystemTheme', { postProcess: 'sentenceCase' }),
+            title: t('setting.useSystemTheme'),
         },
         {
             control: (
@@ -131,16 +231,15 @@ export const ThemeSettings = () => {
                     data={groupedThemeData}
                     defaultValue={settings.theme}
                     onChange={(e) => {
-                        const theme = e as AppTheme;
+                        const theme = e as string;
 
                         setSettings({
                             general: {
-                                ...settings,
                                 theme,
                             },
                         });
 
-                        const colorScheme = theme === AppTheme.DEFAULT_DARK ? 'dark' : 'light';
+                        const colorScheme = getAppTheme(theme).mode ?? 'dark';
 
                         setColorScheme(colorScheme);
 
@@ -149,15 +248,15 @@ export const ThemeSettings = () => {
                         }
                     }}
                     renderOption={renderThemeOption}
+                    searchable
                     width={240}
                 />
             ),
             description: t('setting.theme', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: settings.followSystemTheme,
-            title: t('setting.theme', { postProcess: 'sentenceCase' }),
+            title: t('setting.theme'),
         },
         {
             control: (
@@ -167,8 +266,7 @@ export const ThemeSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             general: {
-                                ...settings,
-                                themeDark: e as AppTheme,
+                                themeDark: e as string,
                             },
                         });
                     }}
@@ -178,10 +276,9 @@ export const ThemeSettings = () => {
             ),
             description: t('setting.themeDark', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !settings.followSystemTheme,
-            title: t('setting.themeDark', { postProcess: 'sentenceCase' }),
+            title: t('setting.themeDark'),
         },
         {
             control: (
@@ -191,8 +288,7 @@ export const ThemeSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             general: {
-                                ...settings,
-                                themeLight: e as AppTheme,
+                                themeLight: e as string,
                             },
                         });
                     }}
@@ -202,10 +298,9 @@ export const ThemeSettings = () => {
             ),
             description: t('setting.themeLight', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !settings.followSystemTheme,
-            title: t('setting.themeLight', { postProcess: 'sentenceCase' }),
+            title: t('setting.themeLight'),
         },
         {
             control: (
@@ -214,7 +309,6 @@ export const ThemeSettings = () => {
                     onChange={(e) => {
                         setSettings({
                             general: {
-                                ...settings,
                                 useThemeAccentColor: e.currentTarget.checked,
                             },
                         });
@@ -223,10 +317,9 @@ export const ThemeSettings = () => {
             ),
             description: t('setting.useThemeAccentColor', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: false,
-            title: t('setting.useThemeAccentColor', { postProcess: 'sentenceCase' }),
+            title: t('setting.useThemeAccentColor'),
         },
         {
             control: (
@@ -238,7 +331,6 @@ export const ThemeSettings = () => {
                         onChangeEnd={(e) => {
                             setSettings({
                                 general: {
-                                    ...settings,
                                     accent: e,
                                 },
                             });
@@ -257,17 +349,64 @@ export const ThemeSettings = () => {
             ),
             description: t('setting.accentColor', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.accentColor', { postProcess: 'sentenceCase' }),
+            title: t('setting.accentColor'),
+        },
+        {
+            control: (
+                <Switch
+                    checked={settings.useThemePrimaryShade}
+                    onChange={(e) => {
+                        setSettings({
+                            general: {
+                                useThemePrimaryShade: e.currentTarget.checked,
+                            },
+                        });
+                    }}
+                />
+            ),
+            description: t('setting.useThemePrimaryShade', {
+                context: 'description',
+            }),
+            isHidden: false,
+            title: t('setting.useThemePrimaryShade'),
+        },
+        {
+            control: (
+                <Slider
+                    defaultValue={settings.primaryShade}
+                    label={(value) => value}
+                    max={9}
+                    min={0}
+                    onChangeEnd={(value) => {
+                        setSettings({
+                            general: {
+                                primaryShade: value,
+                            },
+                        });
+                    }}
+                    step={1}
+                    w={120}
+                />
+            ),
+            description: t('setting.primaryShade', {
+                context: 'description',
+            }),
+            isHidden: settings.useThemePrimaryShade,
+            title: t('setting.primaryShade'),
         },
     ];
 
     return (
         <SettingsSection
-            extra={<StylesSettings />}
+            extra={
+                <>
+                    <CustomThemesManager />
+                    <StylesSettings />
+                </>
+            }
             options={themeOptions}
-            title={t('page.setting.theme', { postProcess: 'sentenceCase' })}
+            title={t('page.setting.theme')}
         />
     );
-};
+});

@@ -1,4 +1,5 @@
 import isElectron from 'is-electron';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -11,10 +12,9 @@ import { Switch } from '/@/shared/components/switch/switch';
 
 const localSettings = isElectron() ? window.api.localSettings : null;
 
-export const WindowHotkeySettings = () => {
+export const WindowHotkeySettings = memo(() => {
     const { t } = useTranslation();
     const settings = useHotkeySettings();
-    const playbackSettings = usePlaybackSettings();
     const { setSettings } = useSettingsStoreActions();
     const { mediaSession } = usePlaybackSettings();
 
@@ -28,7 +28,6 @@ export const WindowHotkeySettings = () => {
                         localSettings!.set('global_media_hotkeys', e.currentTarget.checked);
                         setSettings({
                             hotkeys: {
-                                ...settings,
                                 globalMediaHotkeys: e.currentTarget.checked,
                             },
                         });
@@ -45,7 +44,6 @@ export const WindowHotkeySettings = () => {
                             localSettings!.set('mediaSession', false);
                             setSettings({
                                 playback: {
-                                    ...playbackSettings,
                                     mediaSession: false,
                                 },
                             });
@@ -56,12 +54,11 @@ export const WindowHotkeySettings = () => {
             ),
             description: t('setting.globalMediaHotkeys', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !isElectron(),
-            title: t('setting.globalMediaHotkeys', { postProcess: 'sentenceCase' }),
+            title: t('setting.globalMediaHotkeys'),
         },
     ];
 
     return <SettingsSection options={options} />;
-};
+});

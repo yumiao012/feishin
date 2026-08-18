@@ -1,16 +1,18 @@
 import {
+    useMutation,
     useQuery,
     useQueryClient,
     useSuspenseQuery,
     UseSuspenseQueryOptions,
 } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { queryKeys } from '/@/renderer/api/query-keys';
 import { useListContext } from '/@/renderer/context/list-context';
 import { eventEmitter } from '/@/renderer/events/event-emitter';
 import { UserFavoriteEventPayload, UserRatingEventPayload } from '/@/renderer/events/events';
-import { LibraryItem } from '/@/shared/types/domain-types';
+import { getListRefreshMutationKey } from '/@/renderer/features/shared/components/list-refresh-button';
+import { LibraryItem, SortKeyRandom } from '/@/shared/types/domain-types';
 
 const getQueryKeyName = (itemType: LibraryItem): string => {
     switch (itemType) {
@@ -62,7 +64,7 @@ export const useItemListPaginatedLoader = ({
     const { setItemCount } = useListContext();
 
     useEffect(() => {
-        if (!totalItemCount || !setItemCount) {
+        if (totalItemCount == null || !setItemCount) {
             return;
         }
 
@@ -74,6 +76,8 @@ export const useItemListPaginatedLoader = ({
     const fetchRange = getFetchRange(currentPage, itemsPerPage);
     const startIndex = fetchRange.startIndex;
 
+    const isRandomSort = query?.sortBy === SortKeyRandom;
+
     const queryParams = useMemo(
         () => ({
             limit: itemsPerPage,
@@ -83,8 +87,8 @@ export const useItemListPaginatedLoader = ({
         [itemsPerPage, startIndex, query],
     );
 
-    const { data, refetch: queryRefetch } = useQuery({
-        gcTime: 1000 * 15,
+    const { data } = useQuery({
+        gcTime: isRandomSort ? 1000 * 60 * 10 : 1000 * 15,
         placeholderData: { items: getInitialData(itemsPerPage) },
         queryFn: async ({ signal }) => {
             const result = await listQueryFn({
@@ -95,14 +99,12 @@ export const useItemListPaginatedLoader = ({
             return result;
         },
         queryKey: queryKeys[getQueryKeyName(itemType)].list(serverId, queryParams),
-        staleTime: 1000 * 15,
+        staleTime: isRandomSort ? 1000 * 60 * 10 : 1000 * 15,
     });
 
-    const refresh = useCallback(
-        async (force?: boolean) => {
+    const refreshMutation = useMutation({
+        mutationFn: async (force?: boolean) => {
             const queryKey = queryKeys[getQueryKeyName(itemType)].list(serverId, queryParams);
-
-            await queryClient.invalidateQueries();
 
             if (force) {
                 queryClient.setQueryData(queryKey, {
@@ -110,10 +112,13 @@ export const useItemListPaginatedLoader = ({
                 });
             }
 
-            return queryRefetch();
+            await queryClient.invalidateQueries();
         },
-        [queryClient, queryRefetch, queryParams, serverId, itemType, itemsPerPage],
-    );
+        mutationKey: getListRefreshMutationKey(eventKey ?? 'paginated'),
+    });
+
+    const refreshMutationRef = useRef(refreshMutation);
+    refreshMutationRef.current = refreshMutation;
 
     const updateItems = useCallback(
         (indexes: number[], value: object) => {
@@ -153,7 +158,7 @@ export const useItemListPaginatedLoader = ({
                 return;
             }
 
-            return refresh(true);
+            refreshMutationRef.current.mutate(true);
         };
 
         const handleFavorite = (payload: UserFavoriteEventPayload) => {
@@ -220,7 +225,7 @@ export const useItemListPaginatedLoader = ({
             eventEmitter.off('USER_FAVORITE', handleFavorite);
             eventEmitter.off('USER_RATING', handleRating);
         };
-    }, [data, eventKey, itemType, serverId, refresh, updateItems]);
+    }, [data, eventKey, itemType, serverId, updateItems]);
 
     return { data: data?.items || [], pageCount, totalItemCount };
 };

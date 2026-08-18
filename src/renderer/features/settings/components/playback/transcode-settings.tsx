@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -9,11 +10,11 @@ import { NumberInput } from '/@/shared/components/number-input/number-input';
 import { Switch } from '/@/shared/components/switch/switch';
 import { TextInput } from '/@/shared/components/text-input/text-input';
 
-export const TranscodeSettings = () => {
+export const TranscodeSettings = memo(() => {
     const { t } = useTranslation();
     const { transcode } = usePlaybackSettings();
     const { setTranscodingConfig } = useSettingsStoreActions();
-    const note = t('setting.transcodeNote', { postProcess: 'sentenceCase' });
+    const note = t('setting.transcodeNote');
 
     const transcodeOptions: SettingOption[] = [
         {
@@ -31,10 +32,9 @@ export const TranscodeSettings = () => {
             ),
             description: t('setting.transcode', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             note,
-            title: t('setting.transcode', { postProcess: 'sentenceCase' }),
+            title: t('setting.transcode'),
         },
         {
             control: (
@@ -55,11 +55,10 @@ export const TranscodeSettings = () => {
             ),
             description: t('setting.transcodeBitrate', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !transcode.enabled,
             note,
-            title: t('setting.transcodeBitrate', { postProcess: 'sentenceCase' }),
+            title: t('setting.transcodeBitrate'),
         },
         {
             control: (
@@ -78,18 +77,12 @@ export const TranscodeSettings = () => {
             ),
             description: t('setting.transcodeFormat', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
             isHidden: !transcode.enabled,
             note,
-            title: t('setting.transcodeFormat', { postProcess: 'sentenceCase' }),
+            title: t('setting.transcodeFormat'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={transcodeOptions}
-            title={t('page.setting.transcoding', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={transcodeOptions} title={t('page.setting.transcoding')} />;
+});

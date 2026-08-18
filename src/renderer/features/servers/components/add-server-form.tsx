@@ -5,11 +5,17 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '/@/renderer/api';
+import {
+    isLegacyAuth,
+    isServerLock,
+} from '/@/renderer/features/action-required/utils/window-properties';
 import JellyfinIcon from '/@/renderer/features/servers/assets/jellyfin.png';
 import NavidromeIcon from '/@/renderer/features/servers/assets/navidrome.png';
 import SubsonicIcon from '/@/renderer/features/servers/assets/opensubsonic.png';
-import { useAuthStoreActions } from '/@/renderer/store';
+import { IgnoreCorsSslSwitches } from '/@/renderer/features/servers/components/ignore-cors-ssl-switches';
+import { useAuthStoreActions, useServerList } from '/@/renderer/store';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
+import { Divider } from '/@/shared/components/divider/divider';
 import { Group } from '/@/shared/components/group/group';
 import { ModalButton } from '/@/shared/components/modal/model-shared';
 import { Paper } from '/@/shared/components/paper/paper';
@@ -92,15 +98,20 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
     const focusTrapRef = useFocusTrap(true);
     const [isLoading, setIsLoading] = useState(false);
     const { addServer, setCurrentServer } = useAuthStoreActions();
+    const serverList = useServerList();
     const { servers: discovered } = useAutodiscovery();
+
+    const serverLock = isServerLock();
 
     const form = useForm({
         initialValues: {
-            legacyAuth: false,
+            legacyAuth: isLegacyAuth(),
             name:
                 (localSettings ? localSettings.env.SERVER_NAME : window.SERVER_NAME) || 'My Server',
             password: '',
             preferInstantMix: undefined,
+            preferRemoteUrl: false,
+            remoteUrl: '',
             savePassword: undefined,
             type:
                 (localSettings
@@ -111,9 +122,6 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
         },
     });
 
-    // server lock for web is only true if lock is true *and* all other properties are set
-    const isServerLock = Boolean(window.SERVER_LOCK) || false;
-
     const isSubmitDisabled = !form.values.name || !form.values.url || !form.values.username;
 
     const fillServerDetails = (server: DiscoveredServerItem) => {
@@ -121,11 +129,18 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
     };
 
     const handleSubmit = form.onSubmit(async (values) => {
+        if (serverLock && Object.keys(serverList).length >= 1) {
+            toast.error({
+                message: t('error.serverLockSingleServer'),
+            });
+            return;
+        }
+
         const authFunction = api.controller.authenticate;
 
         if (!authFunction) {
             return toast.error({
-                message: t('error.invalidServer', { postProcess: 'sentenceCase' }),
+                message: t('error.invalidServer'),
             });
         }
 
@@ -143,7 +158,7 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
 
             if (!data) {
                 return toast.error({
-                    message: t('error.authenticationFailed', { postProcess: 'sentenceCase' }),
+                    message: t('error.authenticationFailed'),
                 });
             }
 
@@ -166,6 +181,14 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                 serverItem.savePassword = values.savePassword;
             }
 
+            if (values.remoteUrl?.trim()) {
+                serverItem.remoteUrl = values.remoteUrl.trim().replace(/\/$/, '');
+            }
+
+            if (values.preferRemoteUrl !== undefined) {
+                serverItem.preferRemoteUrl = values.preferRemoteUrl;
+            }
+
             if (data.ndCredential !== undefined) {
                 serverItem.ndCredential = data.ndCredential;
             }
@@ -175,7 +198,7 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
             closeAllModals();
 
             toast.success({
-                message: t('form.addServer.success', { postProcess: 'sentenceCase' }),
+                message: t('form.addServer.success'),
             });
 
             if (localSettings && values.savePassword) {
@@ -184,7 +207,6 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                     toast.error({
                         message: t('form.addServer.error', {
                             context: 'savePassword',
-                            postProcess: 'sentenceCase',
                         }),
                     });
                 }
@@ -221,7 +243,7 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                 <Stack m={5} ref={focusTrapRef}>
                     <SegmentedControl
                         data={ALL_SERVERS}
-                        disabled={isServerLock}
+                        disabled={serverLock}
                         p="md"
                         withItemsBorders={false}
                         {...form.getInputProps('type')}
@@ -229,36 +251,56 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                     <Group grow>
                         <TextInput
                             data-autofocus
-                            disabled={isServerLock}
+                            disabled={serverLock}
                             label={t('form.addServer.input', {
                                 context: 'name',
-                                postProcess: 'titleCase',
                             })}
                             required
                             {...form.getInputProps('name')}
                         />
                         <TextInput
-                            disabled={isServerLock}
+                            disabled={serverLock}
                             label={t('form.addServer.input', {
                                 context: 'url',
-                                postProcess: 'titleCase',
                             })}
                             required
                             {...form.getInputProps('url')}
                         />
                     </Group>
                     <TextInput
+                        disabled={serverLock}
+                        label={t('form.addServer.input', {
+                            context: 'remoteUrl',
+                        })}
+                        placeholder={t('form.addServer.input', {
+                            context: 'remoteUrlPlaceholder',
+                        })}
+                        {...form.getInputProps('remoteUrl')}
+                    />
+                    {form.values.remoteUrl && (
+                        <Checkbox
+                            label={t('form.addServer.input', {
+                                context: 'preferRemoteUrl',
+                            })}
+                            {...form.getInputProps('preferRemoteUrl', {
+                                type: 'checkbox',
+                            })}
+                        />
+                    )}
+                    <TextInput
                         label={t('form.addServer.input', {
                             context: 'username',
-                            postProcess: 'titleCase',
                         })}
                         required
                         {...form.getInputProps('username')}
                     />
                     <PasswordInput
+                        description={
+                            form.values.type === ServerType.NAVIDROME &&
+                            t('form.addServer.input', { context: 'passwordNoSSO' })
+                        }
                         label={t('form.addServer.input', {
                             context: 'password',
-                            postProcess: 'titleCase',
                         })}
                         {...form.getInputProps('password')}
                     />
@@ -266,7 +308,6 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                         <Checkbox
                             label={t('form.addServer.input', {
                                 context: 'savePassword',
-                                postProcess: 'titleCase',
                             })}
                             {...form.getInputProps('savePassword', {
                                 type: 'checkbox',
@@ -275,9 +316,9 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                     )}
                     {form.values.type === ServerType.SUBSONIC && (
                         <Checkbox
+                            disabled={serverLock}
                             label={t('form.addServer.input', {
                                 context: 'legacyAuthentication',
-                                postProcess: 'titleCase',
                             })}
                             {...form.getInputProps('legacyAuth', { type: 'checkbox' })}
                         />
@@ -286,16 +327,21 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                         <Checkbox
                             description={t('form.addServer.input', {
                                 context: 'preferInstantMixDescription',
-                                postProcess: 'sentenceCase',
                             })}
                             label={t('form.addServer.input', {
                                 context: 'preferInstantMix',
-                                postProcess: 'titleCase',
                             })}
                             {...form.getInputProps('preferInstantMix', {
                                 type: 'checkbox',
                             })}
                         />
+                    )}
+                    {isElectron() && (
+                        <>
+                            <Divider />
+                            <IgnoreCorsSslSwitches />
+                            <Divider />
+                        </>
                     )}
                     <Group grow justify="flex-end">
                         {onCancel && (

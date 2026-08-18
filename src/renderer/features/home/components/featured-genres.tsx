@@ -30,19 +30,19 @@ function getGenresToShow(breakpoints: {
     isLargerThanXxxl: boolean;
 }) {
     if (breakpoints.isLargerThanXxxl) {
-        return 42;
+        return 18;
     }
 
     if (breakpoints.isLargerThanXxl) {
-        return 30;
+        return 15;
     }
 
     if (breakpoints.isLargerThanXl) {
-        return 24;
+        return 12;
     }
 
     if (breakpoints.isLargerThanLg) {
-        return 18;
+        return 12;
     }
 
     if (breakpoints.isLargerThanMd) {
@@ -50,7 +50,7 @@ function getGenresToShow(breakpoints: {
     }
 
     if (breakpoints.isLargerThanSm) {
-        return 9;
+        return 8;
     }
 
     return 6;
@@ -120,7 +120,7 @@ export const FeaturedGenres = () => {
                 <>
                     <Group align="flex-end" justify="space-between">
                         <TextTitle fw={700} isNoSelect order={3}>
-                            {t('entity.genre_other', { postProcess: 'titleCase' })}
+                            {t('entity.genre', { count: 2 })}
                         </TextTitle>
                         <Button
                             component={Link}
@@ -128,7 +128,7 @@ export const FeaturedGenres = () => {
                             to={AppRoute.LIBRARY_GENRES}
                             variant="subtle"
                         >
-                            {t('action.viewMore', { postProcess: 'sentenceCase' })}
+                            {t('action.viewMore')}
                         </Button>
                     </Group>
                     <div className={styles.grid}>

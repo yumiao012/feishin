@@ -19,6 +19,7 @@ import {
     Album,
     AlbumArtist,
     Artist,
+    Genre,
     LibraryItem,
     Playlist,
     ServerType,
@@ -30,8 +31,10 @@ interface ItemCardControlsProps {
     controls?: ItemControls;
     enableExpansion?: boolean;
     internalState?: ItemListStateActions;
-    item: Album | AlbumArtist | Artist | Playlist | Song | undefined;
+    item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined;
     itemType: LibraryItem;
+    showFavorite: boolean;
+    showRating: boolean;
     type?: 'compact' | 'default' | 'poster';
 }
 
@@ -59,7 +62,7 @@ const containerProps = {
 const createPlayHandler =
     (
         controls: ItemControls | undefined,
-        item: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+        item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
         internalState: ItemListStateActions | undefined,
         itemType: LibraryItem,
         playType: Play,
@@ -70,6 +73,29 @@ const createPlayHandler =
 
         if (!item) {
             return;
+        }
+
+        const isSongItem =
+            itemType === LibraryItem.SONG ||
+            itemType === LibraryItem.PLAYLIST_SONG ||
+            (item as { _itemType: LibraryItem })._itemType === LibraryItem.SONG;
+
+        if (isSongItem && controls?.onDoubleClick && internalState) {
+            const rowId = internalState.extractRowId(item);
+
+            if (rowId) {
+                const index = internalState.findItemIndex(rowId);
+                return controls.onDoubleClick({
+                    event: null,
+                    index,
+                    internalState,
+                    item,
+                    itemType,
+                    meta: {
+                        playType,
+                    },
+                });
+            }
         }
 
         controls?.onPlay?.({
@@ -84,7 +110,7 @@ const createPlayHandler =
 const createFavoriteHandler =
     (
         controls: ItemControls | undefined,
-        item: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+        item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
         internalState: ItemListStateActions | undefined,
         itemType: LibraryItem,
     ) =>
@@ -109,7 +135,7 @@ const createFavoriteHandler =
 const createRatingChangeHandler =
     (
         controls: ItemControls | undefined,
-        item: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+        item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
         internalState: ItemListStateActions | undefined,
         itemType: LibraryItem,
     ) =>
@@ -141,7 +167,7 @@ const moreDoubleClickHandler = (e: MouseEvent<HTMLButtonElement>) => {
 const createMoreHandler =
     (
         controls: ItemControls | undefined,
-        item: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+        item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
         internalState: ItemListStateActions | undefined,
         itemType: LibraryItem,
     ) =>
@@ -159,7 +185,7 @@ const createMoreHandler =
 const createExpandHandler =
     (
         controls: ItemControls | undefined,
-        item: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+        item: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
         internalState: ItemListStateActions | undefined,
         itemType: LibraryItem,
     ) =>
@@ -180,6 +206,8 @@ export const ItemCardControls = ({
     internalState,
     item,
     itemType,
+    showFavorite,
+    showRating,
     type = 'default',
 }: ItemCardControlsProps) => {
     const playNowHandler = useMemo(
@@ -263,10 +291,11 @@ export const ItemCardControls = ({
                     </PlayTooltip>
                 </Tooltip.Group>
             )}
-            {controls?.onFavorite && (
+            {controls?.onFavorite && showFavorite && (
                 <FavoriteButton isFavorite={isFavorite} onClick={favoriteHandler} />
             )}
             {controls?.onRating &&
+                showRating &&
                 (item?._serverType === ServerType.NAVIDROME ||
                     item?._serverType === ServerType.SUBSONIC) && (
                     <RatingButton

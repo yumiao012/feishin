@@ -8,6 +8,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
+    pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s ease-in-out;
 
@@ -18,14 +19,30 @@
     &:focus-within {
         opacity: 1 !important;
     }
+
+    :global(> *),
+    :global(> * > *),
+    :global(div) {
+        pointer-events: none;
+    }
+
+    :global(button),
+    :global(input),
+    :global([role='button']),
+    :global([role='combobox']),
+    :global([role='textbox']) {
+        pointer-events: auto;
+    }
 }
 
 .lyrics-container {
     position: relative;
     display: flex;
+    flex-direction: column;
     width: 100%;
     min-width: 0;
     height: 100%;
+    min-height: 0;
     overflow: hidden;
 
     &:hover {
@@ -38,14 +55,34 @@
 .scroll-container {
     position: relative;
     z-index: 1;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
     width: 100%;
-    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     text-align: center;
     mask-image: linear-gradient(
         180deg,
-        transparent 5%,
-        rgb(0 0 0 / 100%) 20%,
+        transparent 0%,
+        rgb(0 0 0 / 100%) 15%,
         rgb(0 0 0 / 100%) 85%,
         transparent 95%
     );
+
+    > * {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+    }
+}
+
+.settings-icon {
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.lyrics-container:hover .settings-icon {
+    opacity: 1;
 }

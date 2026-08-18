@@ -1,48 +1,88 @@
 // Component adapted from https://github.com/bvaughn/react-window/issues/826
 
-import { autoScrollForElements } from '@atlaskit/pragmatic-drag-and-drop-auto-scroll/element';
 import clsx from 'clsx';
-import { AnimatePresence, motion } from 'motion/react';
-import { useOverlayScrollbars } from 'overlayscrollbars-react';
+import { motion } from 'motion/react';
 import React, {
     type JSXElementConstructor,
     memo,
     ReactElement,
     Ref,
+    RefObject,
     useCallback,
     useEffect,
     useId,
-    useImperativeHandle,
     useMemo,
     useRef,
     useState,
+    useSyncExternalStore,
 } from 'react';
+import { useParams } from 'react-router';
 import { type CellComponentProps, Grid } from 'react-window-v2';
 
 import styles from './item-table-list.module.css';
 
-import { ExpandedListContainer } from '/@/renderer/components/item-list/expanded-list-container';
-import { ExpandedListItem } from '/@/renderer/components/item-list/expanded-list-item';
+import { appendLayoutFillColumn } from '/@/renderer/components/item-list/helpers/append-layout-fill-column';
 import { createExtractRowId } from '/@/renderer/components/item-list/helpers/extract-row-id';
 import { useDefaultItemListControls } from '/@/renderer/components/item-list/helpers/item-list-controls';
 import {
     ItemListStateActions,
     ItemListStateItemWithRequiredProperties,
     useItemListState,
-    useItemListStateSubscription,
 } from '/@/renderer/components/item-list/helpers/item-list-state';
 import { parseTableColumns } from '/@/renderer/components/item-list/helpers/parse-table-columns';
+import { useListHotkeys } from '/@/renderer/components/item-list/helpers/use-list-hotkeys';
+import { useContainerWidthTracking } from '/@/renderer/components/item-list/item-table-list/hooks/use-container-width-tracking';
+import { useRowInteractionDelegate } from '/@/renderer/components/item-list/item-table-list/hooks/use-row-interaction-delegate';
+import { useStickyGroupRowPositioning } from '/@/renderer/components/item-list/item-table-list/hooks/use-sticky-group-row-positioning';
+import { useStickyHeaderPositioning } from '/@/renderer/components/item-list/item-table-list/hooks/use-sticky-header-positioning';
 import { useStickyTableGroupRows } from '/@/renderer/components/item-list/item-table-list/hooks/use-sticky-table-group-rows';
 import { useStickyTableHeader } from '/@/renderer/components/item-list/item-table-list/hooks/use-sticky-table-header';
+import { useTableColumnModel } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-column-model';
+import { useTableImperativeHandle } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-imperative-handle';
+import { useTableInitialScroll } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-initial-scroll';
+import { useTableKeyboardNavigation } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-keyboard-navigation';
+import { useTablePaneSync } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-pane-sync';
+import { useTableRowModel } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-row-model';
+import { useTableScrollToIndex } from '/@/renderer/components/item-list/item-table-list/hooks/use-table-scroll-to-index';
+import {
+    estimateAlbumGroupContentHeight,
+    getAlbumGroupHeightKey,
+    getAlbumGroupRowCount,
+    getAlbumGroupSpanHeight,
+    getAlbumGroupStartRowIndex,
+    isLastInAlbumGroup,
+    ItemTableListColumn,
+} from '/@/renderer/components/item-list/item-table-list/item-table-list-column';
+import {
+    ItemTableListColumnResizeLiveProvider,
+    type ItemTableListConfig,
+    ItemTableListConfigProvider,
+    ItemTableListStoreProvider,
+    useItemTableListColumnResizeLiveState,
+} from '/@/renderer/components/item-list/item-table-list/item-table-list-context';
+import {
+    MemoizedCellRouter,
+    useColumnCellComponents,
+} from '/@/renderer/components/item-list/item-table-list/memoized-cell-router';
+import {
+    createTableScrollShadowStore,
+    type TableScrollShadowStore,
+} from '/@/renderer/components/item-list/item-table-list/table-scroll-shadow-store';
 import {
     ItemControls,
     ItemListHandle,
     ItemTableListColumnConfig,
 } from '/@/renderer/components/item-list/types';
 import { PlayerContext, usePlayer } from '/@/renderer/features/player/context/player-context';
+import {
+    useAlbumGroupImageSize,
+    useAlbumGroupItems,
+    useAlbumGroupShowFavoriteRating,
+    useAlbumGroupVerticalLayout,
+    usePlayerStore,
+} from '/@/renderer/store';
 import { animationProps } from '/@/shared/components/animations/animation-props';
 import { useFocusWithin } from '/@/shared/hooks/use-focus-within';
-import { useHotkeys } from '/@/shared/hooks/use-hotkeys';
 import { useMergedRef } from '/@/shared/hooks/use-merged-ref';
 import { LibraryItem } from '/@/shared/types/domain-types';
 import { TableColumn } from '/@/shared/types/types';
@@ -57,8 +97,8 @@ const hasRequiredItemProperties = (item: unknown): item is { id: string; serverI
         item !== null &&
         'id' in item &&
         typeof (item as any).id === 'string' &&
-        'serverId' in item &&
-        typeof (item as any).serverId === 'string'
+        '_serverId' in item &&
+        typeof (item as any)._serverId === 'string'
     );
 };
 
@@ -76,40 +116,64 @@ const hasRequiredStateItemProperties = (
         '_serverId' in item &&
         typeof (item as any)._serverId === 'string' &&
         '_itemType' in item &&
-        typeof (item as any)._itemType === 'string' &&
-        'rowId' in item &&
-        typeof (item as any).rowId === 'string'
+        typeof (item as any)._itemType === 'string'
     );
 };
 
-enum TableItemSize {
+export enum TableItemSize {
     COMPACT = 40,
-    DEFAULT = 64,
+    DEFAULT = 66,
     LARGE = 88,
 }
 
+const ItemTableScrollShadowLeft = memo(function ItemTableScrollShadowLeft({
+    enableScrollShadow,
+    pinnedLeftColumnCount,
+    scrollShadowStore,
+}: {
+    enableScrollShadow: boolean;
+    pinnedLeftColumnCount: number;
+    scrollShadowStore: TableScrollShadowStore;
+}) {
+    const { showLeftShadow } = useSyncExternalStore(
+        scrollShadowStore.subscribe,
+        scrollShadowStore.getSnapshot,
+    );
+    if (pinnedLeftColumnCount <= 0 || !enableScrollShadow || !showLeftShadow) return null;
+    return <div className={styles.itemTableLeftScrollShadow} />;
+});
+
+ItemTableScrollShadowLeft.displayName = 'ItemTableScrollShadowLeft';
+
+const ItemTableScrollShadowRight = memo(function ItemTableScrollShadowRight({
+    enableScrollShadow,
+    pinnedRightColumnCount,
+    scrollShadowStore,
+}: {
+    enableScrollShadow: boolean;
+    pinnedRightColumnCount: number;
+    scrollShadowStore: TableScrollShadowStore;
+}) {
+    const { showRightShadow } = useSyncExternalStore(
+        scrollShadowStore.subscribe,
+        scrollShadowStore.getSnapshot,
+    );
+    if (pinnedRightColumnCount <= 0 || !enableScrollShadow || !showRightShadow) return null;
+    return <div className={styles.itemTableRightScrollShadow} />;
+});
+
+ItemTableScrollShadowRight.displayName = 'ItemTableScrollShadowRight';
+
 interface VirtualizedTableGridProps {
-    activeRowId?: string;
+    albumGroupContentHeights: Map<string, number>;
     calculatedColumnWidths: number[];
     CellComponent: JSXElementConstructor<CellComponentProps<TableItemProps>>;
-    cellPadding: 'lg' | 'md' | 'sm' | 'xl' | 'xs';
-    controls: ItemControls;
     data: unknown[];
-    enableAlternateRowColors: boolean;
-    enableColumnReorder: boolean;
-    enableColumnResize: boolean;
-    enableDrag?: boolean;
-    enableExpansion: boolean;
-    enableHeader: boolean;
-    enableHorizontalBorders: boolean;
-    enableRowHoverHighlight: boolean;
-    enableSelection: boolean;
-    enableVerticalBorders: boolean;
-    getRowHeight: (index: number, cellProps: TableItemProps) => number;
-    groups?: TableGroupHeader[];
+    dataWithGroups: (null | unknown)[];
+    enableScrollShadow: boolean;
+    estimatedAlbumGroupContentHeight: number;
+    getItem?: (index: number) => undefined | unknown;
     headerHeight: number;
-    internalState: ItemListStateActions;
-    itemType: LibraryItem;
     mergedRowRef: React.Ref<HTMLDivElement>;
     onRangeChanged?: ItemTableListProps['onRangeChanged'];
     parsedColumns: ReturnType<typeof parseTableColumns>;
@@ -119,39 +183,23 @@ interface VirtualizedTableGridProps {
     pinnedRightColumnRef: React.RefObject<HTMLDivElement | null>;
     pinnedRowCount: number;
     pinnedRowRef: React.RefObject<HTMLDivElement | null>;
-    playerContext: PlayerContext;
-    showLeftShadow: boolean;
-    showRightShadow: boolean;
-    showTopShadow: boolean;
-    size: 'compact' | 'default' | 'large';
-    startRowIndex?: number;
-    tableId: string;
+    scrollShadowStore: TableScrollShadowStore;
+    setAlbumGroupContentHeight: (groupKey: string, height: number) => void;
+    tableConfig: ItemTableListConfig;
     totalColumnCount: number;
     totalRowCount: number;
 }
 
 const VirtualizedTableGrid = ({
-    activeRowId,
+    albumGroupContentHeights,
     calculatedColumnWidths,
     CellComponent,
-    cellPadding,
-    controls,
     data,
-    enableAlternateRowColors,
-    enableColumnReorder,
-    enableColumnResize,
-    enableDrag,
-    enableExpansion,
-    enableHeader,
-    enableHorizontalBorders,
-    enableRowHoverHighlight,
-    enableSelection,
-    enableVerticalBorders,
-    getRowHeight,
-    groups,
+    dataWithGroups,
+    enableScrollShadow,
+    estimatedAlbumGroupContentHeight,
+    getItem,
     headerHeight,
-    internalState,
-    itemType,
     mergedRowRef,
     onRangeChanged,
     parsedColumns,
@@ -161,20 +209,62 @@ const VirtualizedTableGrid = ({
     pinnedRightColumnRef,
     pinnedRowCount,
     pinnedRowRef,
-    playerContext,
-    showLeftShadow,
-    showRightShadow,
-    showTopShadow,
-    size,
-    startRowIndex,
-    tableId,
+    scrollShadowStore,
+    setAlbumGroupContentHeight,
+    tableConfig,
     totalColumnCount,
     totalRowCount,
 }: VirtualizedTableGridProps) => {
+    const { enableHeader, enableRowHoverHighlight, getRowHeight, groups } = tableConfig;
+    const albumGroupImageSize = useAlbumGroupImageSize();
+    const albumGroupVerticalLayout = useAlbumGroupVerticalLayout();
+    const hoverDelegateRef = useRef<HTMLDivElement | null>(null);
+
+    useRowInteractionDelegate({
+        containerRef: hoverDelegateRef,
+        enableRowHoverHighlight,
+    });
+
     const columnWidth = useCallback(
         (index: number) => calculatedColumnWidths[index],
         [calculatedColumnWidths],
     );
+
+    const columnWidthMemoized = useCallback(
+        (index: number) => columnWidth(index + pinnedLeftColumnCount),
+        [columnWidth, pinnedLeftColumnCount],
+    );
+
+    const groupHeaderInfoByRowIndex = useMemo(() => {
+        if (!groups || groups.length === 0) return undefined;
+
+        const map = new Map<number, { groupIndex: number; startDataIndex: number }>();
+        const headerOffset = enableHeader ? 1 : 0;
+        let cumulativeDataIndex = 0;
+
+        for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            const groupHeaderIndex = headerOffset + cumulativeDataIndex + groupIndex;
+            map.set(groupHeaderIndex, { groupIndex, startDataIndex: cumulativeDataIndex });
+            cumulativeDataIndex += groups[groupIndex].itemCount;
+        }
+
+        return map;
+    }, [groups, enableHeader]);
+
+    const rowHeightMemoized = useCallback(
+        (index: number, cellProps: TableItemProps) => {
+            const adjustedIndex = index + pinnedRowCount;
+            return getRowHeight(adjustedIndex, cellProps);
+        },
+        [getRowHeight, pinnedRowCount],
+    );
+
+    const pinnedRightColumnWidthMemoized = useCallback(
+        (index: number) => columnWidth(index + pinnedLeftColumnCount + totalColumnCount),
+        [columnWidth, pinnedLeftColumnCount, totalColumnCount],
+    );
+
+    const getGroupRenderData = useCallback(() => data, [data]);
 
     // Calculate pinned column widths for group header positioning
     const pinnedLeftColumnWidths = useMemo(() => {
@@ -187,160 +277,190 @@ const VirtualizedTableGrid = ({
         );
     }, [pinnedRightColumnCount, pinnedLeftColumnCount, totalColumnCount, columnWidth]);
 
-    // Create data array with group headers inserted as null values
-    // Groups are defined by itemCount, so we calculate indexes based on cumulative item counts
-    const dataWithGroups = useMemo(() => {
-        const result: (null | unknown)[] = enableHeader ? [null] : [];
+    const groupHeaderRowIndexes = useMemo(() => {
+        if (!groupHeaderInfoByRowIndex || groupHeaderInfoByRowIndex.size === 0) return [];
+        return Array.from(groupHeaderInfoByRowIndex.keys()).sort((a, b) => a - b);
+    }, [groupHeaderInfoByRowIndex]);
 
-        if (!groups || groups.length === 0) {
-            // No groups, just add all data
-            result.push(...data);
-            return result;
-        }
+    const adjustedRowIndexCacheRef = useRef<{ lastRowIndex: number; pos: number }>({
+        lastRowIndex: -1,
+        pos: 0,
+    });
 
-        // Calculate group header indexes based on itemCounts
-        const groupIndexes: number[] = [];
-        let cumulativeDataIndex = 0;
-        const headerOffset = enableHeader ? 1 : 0;
+    useEffect(() => {
+        adjustedRowIndexCacheRef.current = { lastRowIndex: -1, pos: 0 };
+    }, [enableHeader, groupHeaderRowIndexes, groups]);
 
-        groups.forEach((group, groupIndex) => {
-            // Group header appears before its items
-            // Index = header offset + cumulative data index + number of previous group headers
-            const groupHeaderIndex = headerOffset + cumulativeDataIndex + groupIndex;
-            groupIndexes.push(groupHeaderIndex);
-            cumulativeDataIndex += group.itemCount;
-        });
-
-        let dataIndex = 0;
-        const startIndex = enableHeader ? 1 : 0;
-        let groupHeaderCount = 0;
-
-        // Iterate through the expanded row space (data + group headers)
-        for (
-            let rowIndex = startIndex;
-            rowIndex < startIndex + data.length + groupIndexes.length;
-            rowIndex++
-        ) {
-            // Check if this row should have a group header
-            const expectedGroupIndex = groupIndexes[groupHeaderCount];
-            if (expectedGroupIndex !== undefined && rowIndex === expectedGroupIndex) {
-                result.push(null); // Group header row
-                groupHeaderCount++;
-            } else if (dataIndex < data.length) {
-                result.push(data[dataIndex]);
-                dataIndex++;
+    const getAdjustedRowIndex = useCallback(
+        (rowIndex: number) => {
+            if (!groups || groups.length === 0) {
+                if (enableHeader && rowIndex === 0) return 0;
+                return enableHeader ? rowIndex : rowIndex + 1;
             }
-        }
-        return result;
-    }, [data, enableHeader, groups]);
 
-    const adjustedRowIndexMap = useMemo(() => {
-        const map = new Map<number, number>();
+            if (enableHeader && rowIndex === 0) return 0;
+            if (groupHeaderInfoByRowIndex?.has(rowIndex)) return 0;
 
-        if (!groups || groups.length === 0) {
-            const startIndex = enableHeader ? 1 : 0;
-            const endIndex = enableHeader ? dataWithGroups.length : dataWithGroups.length;
-            for (let rowIndex = startIndex; rowIndex < endIndex; rowIndex++) {
-                map.set(rowIndex, enableHeader ? rowIndex : rowIndex + 1);
-            }
-            return map;
-        }
+            const headerOffset = enableHeader ? 1 : 0;
+            const cache = adjustedRowIndexCacheRef.current;
 
-        const groupIndexes: number[] = [];
-        let cumulativeDataIndex = 0;
-        const headerOffset = enableHeader ? 1 : 0;
-
-        groups.forEach((group, groupIndex) => {
-            const groupHeaderIndex = headerOffset + cumulativeDataIndex + groupIndex;
-            groupIndexes.push(groupHeaderIndex);
-            cumulativeDataIndex += group.itemCount;
-        });
-
-        let adjustedIndex = 1;
-        const startIndex = enableHeader ? 0 : 0;
-        const endIndex = dataWithGroups.length;
-
-        for (let rowIndex = startIndex; rowIndex < endIndex; rowIndex++) {
-            if (enableHeader && rowIndex === 0) {
-                // Header row
-                map.set(rowIndex, 0);
-            } else if (groupIndexes.includes(rowIndex)) {
-                // Group header row - don't increment adjustedIndex
-                map.set(rowIndex, 0);
+            // Count group header rows strictly before this rowIndex.
+            let pos: number;
+            if (cache.lastRowIndex !== -1 && rowIndex >= cache.lastRowIndex) {
+                pos = cache.pos;
+                while (
+                    pos < groupHeaderRowIndexes.length &&
+                    groupHeaderRowIndexes[pos] < rowIndex
+                ) {
+                    pos++;
+                }
             } else {
-                // Data row
-                map.set(rowIndex, adjustedIndex);
-                adjustedIndex++;
+                // upperBound(groupHeaderRowIndexes, rowIndex - 1)
+                let lo = 0;
+                let hi = groupHeaderRowIndexes.length;
+                const target = rowIndex - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi) >>> 1;
+                    if (groupHeaderRowIndexes[mid] <= target) lo = mid + 1;
+                    else hi = mid;
+                }
+                pos = lo;
             }
-        }
 
-        return map;
-    }, [dataWithGroups, enableHeader, groups]);
+            cache.lastRowIndex = rowIndex;
+            cache.pos = pos;
+
+            const groupHeadersBefore = pos;
+            const dataIndexZeroBased = rowIndex - headerOffset - groupHeadersBefore;
+            return dataIndexZeroBased + 1;
+        },
+        [enableHeader, groupHeaderInfoByRowIndex, groupHeaderRowIndexes, groups],
+    );
+
+    const getRowItem = useCallback(
+        (rowIndex: number): null | undefined | unknown => {
+            // Header row
+            if (enableHeader && rowIndex === 0) return null;
+            // Group header rows are represented as null in the row model
+            if (groupHeaderInfoByRowIndex?.has(rowIndex)) return null;
+
+            if (!groups || groups.length === 0) {
+                const dataIndex = enableHeader ? rowIndex - 1 : rowIndex;
+                return getItem ? getItem(dataIndex) : dataWithGroups[rowIndex];
+            }
+
+            const headerOffset = enableHeader ? 1 : 0;
+
+            // Count group header rows strictly before this rowIndex (upperBound on groupHeaderRowIndexes)
+            let lo = 0;
+            let hi = groupHeaderRowIndexes.length;
+            const target = rowIndex - 1;
+            while (lo < hi) {
+                const mid = (lo + hi) >>> 1;
+                if (groupHeaderRowIndexes[mid] <= target) lo = mid + 1;
+                else hi = mid;
+            }
+            const groupHeadersBefore = lo;
+
+            const dataIndex = rowIndex - headerOffset - groupHeadersBefore;
+            return getItem ? getItem(dataIndex) : undefined;
+        },
+        [
+            dataWithGroups,
+            enableHeader,
+            getItem,
+            groupHeaderInfoByRowIndex,
+            groupHeaderRowIndexes,
+            groups,
+        ],
+    );
 
     const itemProps: TableItemProps = useMemo(
         () => ({
-            activeRowId,
-            adjustedRowIndexMap,
+            albumGroupContentHeights,
+            albumGroupImageSize,
+            albumGroupVerticalLayout,
             calculatedColumnWidths,
-            cellPadding,
-            columns: parsedColumns,
-            controls,
+            cellPadding: tableConfig.cellPadding,
+            columns: tableConfig.columns,
+            controls: tableConfig.controls,
             data: dataWithGroups,
-            enableAlternateRowColors,
-            enableColumnReorder,
-            enableColumnResize,
-            enableDrag,
-            enableExpansion,
-            enableHeader,
-            enableHorizontalBorders,
-            enableRowHoverHighlight,
-            enableSelection,
-            enableVerticalBorders,
-            getRowHeight,
-            groups,
-            internalState,
-            itemType,
+            enableAlternateRowColors: tableConfig.enableAlternateRowColors,
+            enableColumnReorder: tableConfig.enableColumnReorder,
+            enableColumnResize: tableConfig.enableColumnResize,
+            enableDrag: tableConfig.enableDrag,
+            enableExpansion: tableConfig.enableExpansion,
+            enableHeader: tableConfig.enableHeader,
+            enableHorizontalBorders: tableConfig.enableHorizontalBorders,
+            enableRowHoverHighlight: tableConfig.enableRowHoverHighlight,
+            enableSelection: tableConfig.enableSelection,
+            enableVerticalBorders: tableConfig.enableVerticalBorders,
+            estimatedAlbumGroupContentHeight,
+            getAdjustedRowIndex,
+            getGroupRenderData,
+            getRowHeight: tableConfig.getRowHeight,
+            getRowItem,
+            groupHeaderInfoByRowIndex,
+            groups: tableConfig.groups,
+            hasAlbumGroupColumn: parsedColumns.some((col) => col.id === TableColumn.ALBUM_GROUP),
+            internalState: tableConfig.internalState,
+            itemType: tableConfig.itemType,
             pinnedLeftColumnCount,
             pinnedLeftColumnWidths,
             pinnedRightColumnCount,
             pinnedRightColumnWidths,
-            playerContext,
-            size,
-            startRowIndex,
-            tableId,
+            playerContext: tableConfig.playerContext,
+            playlistId: tableConfig.playlistId,
+            setAlbumGroupContentHeight,
+            size: tableConfig.size,
+            startRowIndex: tableConfig.startRowIndex,
+            tableId: tableConfig.tableId,
         }),
         [
-            activeRowId,
-            adjustedRowIndexMap,
+            albumGroupContentHeights,
+            albumGroupImageSize,
+            albumGroupVerticalLayout,
             calculatedColumnWidths,
-            cellPadding,
-            parsedColumns,
-            controls,
             dataWithGroups,
-            enableAlternateRowColors,
-            enableColumnReorder,
-            enableColumnResize,
-            enableDrag,
-            enableExpansion,
-            enableHeader,
-            enableHorizontalBorders,
-            enableRowHoverHighlight,
-            enableSelection,
-            enableVerticalBorders,
-            getRowHeight,
-            groups,
-            internalState,
-            itemType,
+            estimatedAlbumGroupContentHeight,
+            getAdjustedRowIndex,
+            getGroupRenderData,
+            getRowItem,
+            groupHeaderInfoByRowIndex,
+            parsedColumns,
             pinnedLeftColumnCount,
             pinnedLeftColumnWidths,
             pinnedRightColumnCount,
             pinnedRightColumnWidths,
-            playerContext,
-            size,
-            startRowIndex,
-            tableId,
+            setAlbumGroupContentHeight,
+            tableConfig,
         ],
     );
+
+    const pinnedLeftGridMinWidthPx = useMemo(() => {
+        let sum = 0;
+        for (let i = 0; i < pinnedLeftColumnCount; i++) {
+            sum += calculatedColumnWidths[i] ?? 0;
+        }
+        return sum;
+    }, [calculatedColumnWidths, pinnedLeftColumnCount]);
+
+    const pinnedRightGridMinWidthPx = useMemo(() => {
+        let sum = 0;
+        const start = pinnedLeftColumnCount + totalColumnCount;
+        for (let i = 0; i < pinnedRightColumnCount; i++) {
+            sum += calculatedColumnWidths[start + i] ?? 0;
+        }
+        return sum;
+    }, [calculatedColumnWidths, pinnedLeftColumnCount, pinnedRightColumnCount, totalColumnCount]);
+
+    const pinnedRowsMinHeightPx = useMemo(() => {
+        let sum = 0;
+        for (let i = 0; i < pinnedRowCount; i++) {
+            sum += getRowHeight(i, itemProps);
+        }
+        return sum;
+    }, [getRowHeight, itemProps, pinnedRowCount]);
 
     const PinnedRowCell = useCallback(
         (cellProps: CellComponentProps & TableItemProps) => {
@@ -415,16 +535,13 @@ const VirtualizedTableGrid = ({
     );
 
     return (
-        <div className={styles.itemTableContainer}>
+        <div className={styles.itemTableContainer} ref={hoverDelegateRef}>
             <div
                 className={styles.itemTablePinnedColumnsGridContainer}
                 style={
                     {
                         '--header-height': `${headerHeight}px`,
-                        minWidth: `${Array.from({ length: pinnedLeftColumnCount }, () => 0).reduce(
-                            (a, _, i) => a + columnWidth(i),
-                            0,
-                        )}px`,
+                        minWidth: `${pinnedLeftGridMinWidthPx}px`,
                     } as React.CSSProperties
                 }
             >
@@ -434,11 +551,8 @@ const VirtualizedTableGrid = ({
                             [styles.withHeader]: enableHeader,
                         })}
                         style={{
-                            minHeight: `${Array.from({ length: pinnedRowCount }, () => 0).reduce(
-                                (a, _, i) => a + getRowHeight(i, itemProps),
-                                0,
-                            )}px`,
-                            overflow: 'hidden',
+                            minHeight: `${pinnedRowsMinHeightPx}px`,
+                            overflow: 'visible',
                         }}
                     >
                         <Grid
@@ -451,9 +565,6 @@ const VirtualizedTableGrid = ({
                             rowHeight={getRowHeight}
                         />
                     </div>
-                )}
-                {enableHeader && showTopShadow && (
-                    <div className={styles.itemTableTopScrollShadow} />
                 )}
                 {!!pinnedLeftColumnCount && (
                     <div
@@ -491,10 +602,7 @@ const VirtualizedTableGrid = ({
                         style={
                             {
                                 '--header-height': `${headerHeight}px`,
-                                minHeight: `${Array.from(
-                                    { length: pinnedRowCount },
-                                    () => 0,
-                                ).reduce((a, _, i) => a + getRowHeight(i, itemProps), 0)}px`,
+                                minHeight: `${pinnedRowsMinHeightPx}px`,
                                 overflow: 'hidden',
                             } as React.CSSProperties
                         }
@@ -507,13 +615,10 @@ const VirtualizedTableGrid = ({
                             columnWidth={(index) => {
                                 return columnWidth(index + pinnedLeftColumnCount);
                             }}
-                            rowCount={Array.from({ length: pinnedRowCount }, () => 0).length}
+                            rowCount={pinnedRowCount}
                             rowHeight={getRowHeight}
                         />
                     </div>
-                )}
-                {enableHeader && showTopShadow && (
-                    <div className={styles.itemTableTopScrollShadow} />
                 )}
                 <div className={styles.itemTableGridContainer} ref={mergedRowRef}>
                     <Grid
@@ -521,21 +626,21 @@ const VirtualizedTableGrid = ({
                         cellProps={itemProps}
                         className={styles.height100}
                         columnCount={totalColumnCount}
-                        columnWidth={(index) => {
-                            return columnWidth(index + pinnedLeftColumnCount);
-                        }}
+                        columnWidth={columnWidthMemoized}
                         onCellsRendered={handleOnCellsRendered}
                         rowCount={totalRowCount}
-                        rowHeight={(index, cellProps) => {
-                            return getRowHeight(index + pinnedRowCount, cellProps);
-                        }}
+                        rowHeight={rowHeightMemoized}
                     />
-                    {pinnedLeftColumnCount > 0 && showLeftShadow && (
-                        <div className={styles.itemTableLeftScrollShadow} />
-                    )}
-                    {pinnedRightColumnCount > 0 && showRightShadow && (
-                        <div className={styles.itemTableRightScrollShadow} />
-                    )}
+                    <ItemTableScrollShadowLeft
+                        enableScrollShadow={enableScrollShadow}
+                        pinnedLeftColumnCount={pinnedLeftColumnCount}
+                        scrollShadowStore={scrollShadowStore}
+                    />
+                    <ItemTableScrollShadowRight
+                        enableScrollShadow={enableScrollShadow}
+                        pinnedRightColumnCount={pinnedRightColumnCount}
+                        scrollShadowStore={scrollShadowStore}
+                    />
                 </div>
             </div>
             {!!pinnedRightColumnCount && (
@@ -544,14 +649,7 @@ const VirtualizedTableGrid = ({
                     style={
                         {
                             '--header-height': `${headerHeight}px`,
-                            minWidth: `${Array.from(
-                                { length: pinnedRightColumnCount },
-                                () => 0,
-                            ).reduce(
-                                (a, _, i) =>
-                                    a + columnWidth(i + pinnedLeftColumnCount + totalColumnCount),
-                                0,
-                            )}px`,
+                            minWidth: `${pinnedRightGridMinWidthPx}px`,
                         } as React.CSSProperties
                     }
                 >
@@ -561,11 +659,8 @@ const VirtualizedTableGrid = ({
                                 [styles.withHeader]: enableHeader,
                             })}
                             style={{
-                                minHeight: `${Array.from(
-                                    { length: pinnedRowCount },
-                                    () => 0,
-                                ).reduce((a, _, i) => a + getRowHeight(i, itemProps), 0)}px`,
-                                overflow: 'hidden',
+                                minHeight: `${pinnedRowsMinHeightPx}px`,
+                                overflow: 'visible',
                             }}
                         >
                             <Grid
@@ -583,9 +678,6 @@ const VirtualizedTableGrid = ({
                             />
                         </div>
                     )}
-                    {enableHeader && showTopShadow && (
-                        <div className={styles.itemTableTopScrollShadow} />
-                    )}
                     <div
                         className={styles.itemTablePinnedRightColumnsContainer}
                         ref={pinnedRightColumnRef}
@@ -595,15 +687,9 @@ const VirtualizedTableGrid = ({
                             cellProps={itemProps}
                             className={clsx(styles.noScrollbar, styles.height100)}
                             columnCount={pinnedRightColumnCount}
-                            columnWidth={(index) => {
-                                return columnWidth(
-                                    index + pinnedLeftColumnCount + totalColumnCount,
-                                );
-                            }}
+                            columnWidth={pinnedRightColumnWidthMemoized}
                             rowCount={totalRowCount}
-                            rowHeight={(index, cellProps) => {
-                                return getRowHeight(index + pinnedRowCount, cellProps);
-                            }}
+                            rowHeight={rowHeightMemoized}
                         />
                     </div>
                 </div>
@@ -613,6 +699,48 @@ const VirtualizedTableGrid = ({
 };
 
 VirtualizedTableGrid.displayName = 'VirtualizedTableGrid';
+
+function shallowEqualNumberArrays(a: number[], b: number[]): boolean {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+const MemoizedVirtualizedTableGrid = memo(VirtualizedTableGrid, (prevProps, nextProps) => {
+    return (
+        shallowEqualNumberArrays(
+            prevProps.calculatedColumnWidths,
+            nextProps.calculatedColumnWidths,
+        ) &&
+        prevProps.albumGroupContentHeights === nextProps.albumGroupContentHeights &&
+        prevProps.estimatedAlbumGroupContentHeight === nextProps.estimatedAlbumGroupContentHeight &&
+        prevProps.setAlbumGroupContentHeight === nextProps.setAlbumGroupContentHeight &&
+        prevProps.tableConfig === nextProps.tableConfig &&
+        prevProps.data === nextProps.data &&
+        prevProps.dataWithGroups === nextProps.dataWithGroups &&
+        prevProps.enableScrollShadow === nextProps.enableScrollShadow &&
+        prevProps.getItem === nextProps.getItem &&
+        prevProps.headerHeight === nextProps.headerHeight &&
+        prevProps.mergedRowRef === nextProps.mergedRowRef &&
+        prevProps.onRangeChanged === nextProps.onRangeChanged &&
+        prevProps.parsedColumns === nextProps.parsedColumns &&
+        prevProps.pinnedLeftColumnCount === nextProps.pinnedLeftColumnCount &&
+        prevProps.pinnedLeftColumnRef === nextProps.pinnedLeftColumnRef &&
+        prevProps.pinnedRightColumnCount === nextProps.pinnedRightColumnCount &&
+        prevProps.pinnedRightColumnRef === nextProps.pinnedRightColumnRef &&
+        prevProps.pinnedRowCount === nextProps.pinnedRowCount &&
+        prevProps.pinnedRowRef === nextProps.pinnedRowRef &&
+        prevProps.scrollShadowStore === nextProps.scrollShadowStore &&
+        prevProps.totalColumnCount === nextProps.totalColumnCount &&
+        prevProps.totalRowCount === nextProps.totalRowCount &&
+        prevProps.CellComponent === nextProps.CellComponent
+    );
+});
+
+MemoizedVirtualizedTableGrid.displayName = 'MemoizedVirtualizedTableGrid';
 
 export interface TableGroupHeader {
     itemCount: number;
@@ -626,8 +754,10 @@ export interface TableGroupHeader {
 }
 
 export interface TableItemProps {
-    activeRowId?: string;
     adjustedRowIndexMap?: Map<number, number>;
+    albumGroupContentHeights?: Map<string, number>;
+    albumGroupImageSize?: number;
+    albumGroupVerticalLayout?: boolean;
     calculatedColumnWidths?: number[];
     cellPadding?: ItemTableListProps['cellPadding'];
     columns: ItemTableListColumnConfig[];
@@ -637,14 +767,21 @@ export interface TableItemProps {
     enableColumnReorder?: boolean;
     enableColumnResize?: boolean;
     enableDrag?: ItemTableListProps['enableDrag'];
+    enableDragScroll?: boolean;
     enableExpansion?: ItemTableListProps['enableExpansion'];
     enableHeader?: ItemTableListProps['enableHeader'];
     enableHorizontalBorders?: ItemTableListProps['enableHorizontalBorders'];
     enableRowHoverHighlight?: ItemTableListProps['enableRowHoverHighlight'];
     enableSelection?: ItemTableListProps['enableSelection'];
     enableVerticalBorders?: ItemTableListProps['enableVerticalBorders'];
+    estimatedAlbumGroupContentHeight?: number;
+    getAdjustedRowIndex?: (rowIndex: number) => number;
+    getGroupRenderData?: () => unknown[];
     getRowHeight: (index: number, cellProps: TableItemProps) => number;
+    getRowItem?: (rowIndex: number) => null | undefined | unknown;
+    groupHeaderInfoByRowIndex?: Map<number, { groupIndex: number; startDataIndex: number }>;
     groups?: TableGroupHeader[];
+    hasAlbumGroupColumn?: boolean;
     internalState: ItemListStateActions;
     itemType: ItemTableListProps['itemType'];
     onRowClick?: (item: any, event: React.MouseEvent<HTMLDivElement>) => void;
@@ -653,6 +790,8 @@ export interface TableItemProps {
     pinnedRightColumnCount?: number;
     pinnedRightColumnWidths?: number[];
     playerContext: PlayerContext;
+    playlistId?: string;
+    setAlbumGroupContentHeight?: (groupKey: string, height: number) => void;
     size?: ItemTableListProps['size'];
     startRowIndex?: number;
     tableId: string;
@@ -661,21 +800,28 @@ export interface TableItemProps {
 interface ItemTableListProps {
     activeRowId?: string;
     autoFitColumns?: boolean;
-    CellComponent: JSXElementConstructor<CellComponentProps<TableItemProps>>;
+    autoScrollToActiveRow?: boolean;
+    CellComponent?: JSXElementConstructor<CellComponentProps<TableItemProps>>;
     cellPadding?: 'lg' | 'md' | 'sm' | 'xl' | 'xs';
     columns: ItemTableListColumnConfig[];
     data: unknown[];
     enableAlternateRowColors?: boolean;
     enableDrag?: boolean;
+    enableDragScroll?: boolean;
+    enableEntranceAnimation?: boolean;
     enableExpansion?: boolean;
     enableHeader?: boolean;
     enableHorizontalBorders?: boolean;
     enableRowHoverHighlight?: boolean;
+    enableScrollShadow?: boolean;
     enableSelection?: boolean;
     enableSelectionDialog?: boolean;
     enableStickyGroupRows?: boolean;
     enableStickyHeader?: boolean;
     enableVerticalBorders?: boolean;
+    getItem?: (index: number) => undefined | unknown;
+    getItemIndex?: (rowId: string) => number | undefined;
+    getLoadedItems?: () => unknown[];
     getRowId?: ((item: unknown) => string) | string;
     groups?: TableGroupHeader[];
     headerHeight?: number;
@@ -684,6 +830,7 @@ interface ItemTableListProps {
         to: number;
         type: 'index' | 'offset';
     };
+    itemCount?: number;
     itemType: LibraryItem;
     onColumnReordered?: (
         columnIdFrom: TableColumn,
@@ -700,27 +847,425 @@ interface ItemTableListProps {
     startRowIndex?: number;
 }
 
+const ItemTableListStickyUI = memo(
+    ({
+        calculatedColumnWidths,
+        CellComponent,
+        containerRef,
+        data,
+        enableHeader,
+        enableStickyGroupRows,
+        enableStickyHeader,
+        getRowHeightWrapper,
+        groups,
+        headerHeight,
+        internalState,
+        parsedColumns,
+        pinnedLeftColumnCount,
+        pinnedLeftColumnRef,
+        pinnedRightColumnCount,
+        pinnedRightColumnRef,
+        pinnedRowRef,
+        rowHeight,
+        rowRef,
+        size,
+        stickyHeaderItemProps,
+        totalColumnCount,
+    }: {
+        calculatedColumnWidths: number[];
+        CellComponent: JSXElementConstructor<CellComponentProps<TableItemProps>>;
+        containerRef: RefObject<HTMLDivElement | null>;
+        data: unknown[];
+        enableHeader: boolean;
+        enableStickyGroupRows: boolean;
+        enableStickyHeader: boolean;
+        getRowHeightWrapper: (index: number) => number;
+        groups?: TableGroupHeader[];
+        headerHeight: number;
+        internalState: ItemListStateActions;
+        parsedColumns: ReturnType<typeof parseTableColumns>;
+        pinnedLeftColumnCount: number;
+        pinnedLeftColumnRef: RefObject<HTMLDivElement | null>;
+        pinnedRightColumnCount: number;
+        pinnedRightColumnRef: RefObject<HTMLDivElement | null>;
+        pinnedRowRef: RefObject<HTMLDivElement | null>;
+        rowHeight?: ((index: number, cellProps: TableItemProps) => number) | number;
+        rowRef: RefObject<HTMLDivElement | null>;
+        size: 'compact' | 'default' | 'large';
+        stickyHeaderItemProps: TableItemProps;
+        totalColumnCount: number;
+    }) => {
+        const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+        const stickyGroupRowRef = useRef<HTMLDivElement | null>(null);
+        const stickyHeaderLeftRef = useRef<HTMLDivElement | null>(null);
+        const stickyHeaderMainRef = useRef<HTMLDivElement | null>(null);
+        const stickyHeaderRightRef = useRef<HTMLDivElement | null>(null);
+
+        const { shouldShowStickyHeader, stickyTop } = useStickyTableHeader({
+            containerRef,
+            enabled: enableHeader && enableStickyHeader,
+            headerRef: pinnedRowRef,
+            mainGridRef: rowRef,
+            pinnedLeftColumnRef,
+            pinnedRightColumnRef,
+            stickyHeaderMainRef,
+        });
+
+        useStickyHeaderPositioning({
+            containerRef,
+            shouldShowStickyHeader,
+            stickyHeaderRef,
+        });
+
+        const {
+            shouldShowStickyGroupRow,
+            stickyGroupIndex,
+            stickyTop: stickyGroupTop,
+        } = useStickyTableGroupRows({
+            containerRef,
+            enabled: enableStickyGroupRows && !!groups && groups.length > 0,
+            getRowHeight: getRowHeightWrapper,
+            groups,
+            headerHeight,
+            mainGridRef: rowRef,
+            shouldShowStickyHeader,
+            stickyHeaderTop: stickyTop,
+        });
+
+        const shouldRenderStickyGroupRow = shouldShowStickyGroupRow;
+
+        useStickyGroupRowPositioning({
+            containerRef,
+            shouldRenderStickyGroupRow,
+            stickyGroupRowRef,
+        });
+
+        const StickyHeader = useMemo(() => {
+            if (!shouldShowStickyHeader || !enableHeader) {
+                return null;
+            }
+
+            const pinnedLeftWidth = calculatedColumnWidths
+                .slice(0, pinnedLeftColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+            const mainWidth = calculatedColumnWidths
+                .slice(pinnedLeftColumnCount, pinnedLeftColumnCount + totalColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+            const pinnedRightWidth = calculatedColumnWidths
+                .slice(pinnedLeftColumnCount + totalColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+
+            return (
+                <div
+                    className={styles.stickyHeader}
+                    ref={stickyHeaderRef}
+                    style={{
+                        top: `${stickyTop}px`,
+                    }}
+                >
+                    <div className={styles.stickyHeaderRow}>
+                        {pinnedLeftColumnCount > 0 && (
+                            <div
+                                className={clsx(
+                                    styles.stickyHeaderSection,
+                                    styles.stickyHeaderPinnedLeft,
+                                )}
+                                ref={stickyHeaderLeftRef}
+                                style={{
+                                    flex: '0 1 auto',
+                                    minWidth: `${pinnedLeftWidth}px`,
+                                    overflow: 'visible',
+                                }}
+                            >
+                                {parsedColumns
+                                    .filter((col) => col.pinned === 'left')
+                                    .map((col) => {
+                                        const columnIndex = parsedColumns.findIndex(
+                                            (c) => c === col,
+                                        );
+                                        return (
+                                            <CellComponent
+                                                ariaAttributes={{
+                                                    'aria-colindex': columnIndex + 1,
+                                                    role: 'gridcell',
+                                                }}
+                                                columnIndex={columnIndex}
+                                                key={col.id}
+                                                rowIndex={0}
+                                                style={{
+                                                    height: headerHeight,
+                                                    width: calculatedColumnWidths[columnIndex],
+                                                }}
+                                                {...stickyHeaderItemProps}
+                                            />
+                                        );
+                                    })}
+                            </div>
+                        )}
+                        <div
+                            className={clsx(
+                                styles.stickyHeaderSection,
+                                styles.stickyHeaderMain,
+                                styles.noScrollbar,
+                            )}
+                            ref={stickyHeaderMainRef}
+                            style={{
+                                flex: '1 1 auto',
+                                minWidth: 0,
+                                overflowX: 'auto',
+                                overflowY: 'hidden',
+                            }}
+                        >
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    minWidth: `${mainWidth}px`,
+                                }}
+                            >
+                                {parsedColumns
+                                    .filter((col) => col.pinned === null)
+                                    .map((col) => {
+                                        const columnIndex = parsedColumns.findIndex(
+                                            (c) => c === col,
+                                        );
+                                        return (
+                                            <CellComponent
+                                                ariaAttributes={{
+                                                    'aria-colindex': columnIndex + 1,
+                                                    role: 'gridcell',
+                                                }}
+                                                columnIndex={columnIndex}
+                                                key={col.id}
+                                                rowIndex={0}
+                                                style={{
+                                                    flexShrink: 0,
+                                                    height: headerHeight,
+                                                    width: calculatedColumnWidths[columnIndex],
+                                                }}
+                                                {...stickyHeaderItemProps}
+                                            />
+                                        );
+                                    })}
+                            </div>
+                        </div>
+                        {pinnedRightColumnCount > 0 && (
+                            <div
+                                className={clsx(
+                                    styles.stickyHeaderSection,
+                                    styles.stickyHeaderPinnedRight,
+                                )}
+                                ref={stickyHeaderRightRef}
+                                style={{
+                                    flex: '0 1 auto',
+                                    minWidth: `${pinnedRightWidth}px`,
+                                    overflow: 'visible',
+                                }}
+                            >
+                                {parsedColumns
+                                    .filter((col) => col.pinned === 'right')
+                                    .map((col) => {
+                                        const columnIndex = parsedColumns.findIndex(
+                                            (c) => c === col,
+                                        );
+                                        return (
+                                            <CellComponent
+                                                ariaAttributes={{
+                                                    'aria-colindex': columnIndex + 1,
+                                                    role: 'gridcell',
+                                                }}
+                                                columnIndex={columnIndex}
+                                                key={col.id}
+                                                rowIndex={0}
+                                                style={{
+                                                    height: headerHeight,
+                                                    width: calculatedColumnWidths[columnIndex],
+                                                }}
+                                                {...stickyHeaderItemProps}
+                                            />
+                                        );
+                                    })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }, [
+            shouldShowStickyHeader,
+            enableHeader,
+            stickyTop,
+            calculatedColumnWidths,
+            pinnedLeftColumnCount,
+            pinnedRightColumnCount,
+            totalColumnCount,
+            parsedColumns,
+            headerHeight,
+            CellComponent,
+            stickyHeaderItemProps,
+        ]);
+
+        const groupRowHeight = useMemo(() => {
+            if (stickyGroupIndex === null || !groups) {
+                const height = size === 'compact' ? 40 : size === 'large' ? 88 : 64;
+                return typeof rowHeight === 'number' ? rowHeight : height;
+            }
+
+            let cumulativeDataIndex = 0;
+            const headerOffset = enableHeader ? 1 : 0;
+            for (let i = 0; i < stickyGroupIndex; i++) {
+                cumulativeDataIndex += groups[i].itemCount;
+            }
+            const groupHeaderIndex = headerOffset + cumulativeDataIndex + stickyGroupIndex;
+
+            return getRowHeightWrapper(groupHeaderIndex);
+        }, [stickyGroupIndex, groups, getRowHeightWrapper, enableHeader, rowHeight, size]);
+
+        const StickyGroupRow = useMemo(() => {
+            if (!shouldRenderStickyGroupRow || stickyGroupIndex === null || !groups) {
+                return null;
+            }
+
+            const group = groups[stickyGroupIndex];
+            const originalData = data.filter((item) => item !== null);
+            let cumulativeDataIndex = 0;
+            for (let i = 0; i < stickyGroupIndex; i++) {
+                cumulativeDataIndex += groups[i].itemCount;
+            }
+
+            const groupContent = group.render({
+                data: originalData,
+                groupIndex: stickyGroupIndex,
+                index: 0,
+                internalState,
+                startDataIndex: cumulativeDataIndex,
+            });
+
+            const pinnedLeftWidth = calculatedColumnWidths
+                .slice(0, pinnedLeftColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+            const mainWidth = calculatedColumnWidths
+                .slice(pinnedLeftColumnCount, pinnedLeftColumnCount + totalColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+            const pinnedRightWidth = calculatedColumnWidths
+                .slice(pinnedLeftColumnCount + totalColumnCount)
+                .reduce((sum, width) => sum + width, 0);
+
+            const totalTableWidth = calculatedColumnWidths.reduce((sum, width) => sum + width, 0);
+            const actualStickyTop = stickyGroupTop;
+
+            return (
+                <div
+                    className={styles.stickyGroupRow}
+                    ref={stickyGroupRowRef}
+                    style={{
+                        top: `${actualStickyTop}px`,
+                    }}
+                >
+                    <div className={styles.stickyGroupRowContent}>
+                        {pinnedLeftColumnCount > 0 && (
+                            <div
+                                className={styles.stickyGroupRowSection}
+                                style={{ width: `${pinnedLeftWidth}px` }}
+                            >
+                                <div
+                                    style={{
+                                        height: groupRowHeight,
+                                        width: `${pinnedLeftWidth}px`,
+                                    }}
+                                >
+                                    {groupContent}
+                                </div>
+                            </div>
+                        )}
+                        <div
+                            className={styles.stickyGroupRowSection}
+                            style={{
+                                marginLeft: pinnedLeftColumnCount > 0 ? 0 : '-2rem',
+                                marginRight: '-2rem',
+                                paddingLeft: pinnedLeftColumnCount > 0 ? 0 : '2rem',
+                                paddingRight: '2rem',
+                                width: `${mainWidth}px`,
+                            }}
+                        >
+                            <div
+                                style={{
+                                    height: groupRowHeight,
+                                    marginLeft: pinnedLeftWidth > 0 ? `-${pinnedLeftWidth}px` : 0,
+                                    width: `${totalTableWidth}px`,
+                                }}
+                            >
+                                {groupContent}
+                            </div>
+                        </div>
+                        {pinnedRightColumnCount > 0 && (
+                            <div
+                                className={styles.stickyGroupRowSection}
+                                style={{ width: `${pinnedRightWidth}px` }}
+                            >
+                                <div
+                                    style={{
+                                        height: groupRowHeight,
+                                        width: `${pinnedRightWidth}px`,
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }, [
+            shouldRenderStickyGroupRow,
+            stickyGroupIndex,
+            groups,
+            data,
+            internalState,
+            calculatedColumnWidths,
+            pinnedLeftColumnCount,
+            pinnedRightColumnCount,
+            totalColumnCount,
+            groupRowHeight,
+            stickyGroupTop,
+        ]);
+
+        return (
+            <>
+                {StickyHeader}
+                {StickyGroupRow}
+            </>
+        );
+    },
+);
+
+ItemTableListStickyUI.displayName = 'ItemTableListStickyUI';
+
 const BaseItemTableList = ({
     activeRowId,
     autoFitColumns = false,
-    CellComponent,
+    autoScrollToActiveRow = false,
+    CellComponent = ItemTableListColumn,
     cellPadding = 'sm',
     columns,
     data,
     enableAlternateRowColors = false,
     enableDrag = true,
+    enableDragScroll = true,
+    enableEntranceAnimation = true,
     enableExpansion = true,
     enableHeader = true,
     enableHorizontalBorders = false,
     enableRowHoverHighlight = true,
+    enableScrollShadow = true,
     enableSelection = true,
     enableStickyGroupRows = false,
     enableStickyHeader = false,
     enableVerticalBorders = false,
+    getItem,
+    getItemIndex,
+    getLoadedItems,
     getRowId,
     groups,
     headerHeight = 40,
     initialTop,
+    itemCount,
     itemType,
     onColumnReordered,
     onColumnResized,
@@ -732,872 +1277,154 @@ const BaseItemTableList = ({
     size = 'default',
     startRowIndex,
 }: ItemTableListProps) => {
+    const { playlistId: routePlaylistId } = useParams() as { playlistId?: string };
     const tableId = useId();
-    const totalItemCount = enableHeader ? data.length + 1 : data.length;
-    const parsedColumns = useMemo(() => parseTableColumns(columns), [columns]);
-    const columnCount = parsedColumns.length;
-    const playerContext = usePlayer();
+    const albumGroupImageSize = useAlbumGroupImageSize();
+    const albumGroupItems = useAlbumGroupItems();
+    const albumGroupShowFavoriteRating = useAlbumGroupShowFavoriteRating();
+    const albumGroupVerticalLayout = useAlbumGroupVerticalLayout();
+    const albumGroupMetadataRowCount = useMemo(
+        () => albumGroupItems.filter((item) => !item.disabled).length,
+        [albumGroupItems],
+    );
+    const estimatedAlbumGroupContentHeight = useMemo(
+        () =>
+            estimateAlbumGroupContentHeight({
+                metadataRowCount: albumGroupMetadataRowCount,
+                showControls: albumGroupShowFavoriteRating,
+            }),
+        [albumGroupMetadataRowCount, albumGroupShowFavoriteRating],
+    );
+    const baseItemCount = itemCount ?? data.length;
+    const [albumGroupContentHeights, setAlbumGroupContentHeights] = useState(
+        () => new Map<string, number>(),
+    );
+
+    const setAlbumGroupContentHeight = useCallback((groupKey: string, height: number) => {
+        setAlbumGroupContentHeights((prev) => {
+            if (prev.get(groupKey) === height) return prev;
+            const next = new Map(prev);
+            next.set(groupKey, height);
+            return next;
+        });
+    }, []);
+
+    useEffect(() => {
+        setAlbumGroupContentHeights(new Map());
+    }, [albumGroupShowFavoriteRating, albumGroupVerticalLayout, baseItemCount]);
+
+    const totalItemCount = enableHeader ? baseItemCount + 1 : baseItemCount;
     const [centerContainerWidth, setCenterContainerWidth] = useState(0);
     const [totalContainerWidth, setTotalContainerWidth] = useState(0);
 
-    // Compute distributed widths: unpinned columns with autoWidth will share any remaining space
-    // When autoSizeColumns is true, all column widths are treated as proportions and scaled to fit the container
-    const calculatedColumnWidths = useMemo(() => {
-        const baseWidths = parsedColumns.map((c) => c.width);
+    const columnsForLayout = useMemo(
+        () => appendLayoutFillColumn(columns, autoFitColumns),
+        [autoFitColumns, columns],
+    );
 
-        // When autoSizeColumns is enabled, treat all widths as proportions and scale to fit container
-        if (autoFitColumns) {
-            // Calculate total reference width (sum of all base widths)
-            const totalReferenceWidth = baseWidths.reduce((sum, width) => sum + width, 0);
+    const {
+        calculatedColumnWidths,
+        parsedColumns,
+        pinnedLeftColumnCount,
+        pinnedRightColumnCount,
+        totalColumnCount,
+    } = useTableColumnModel({
+        autoFitColumns,
+        centerContainerWidth,
+        columns: columnsForLayout,
+        totalContainerWidth,
+    });
 
-            if (totalReferenceWidth === 0 || totalContainerWidth === 0) {
-                return baseWidths.map((width) => Math.round(width));
-            }
+    const { clearColumnResizePreview, columnResizePreview, scheduleColumnResizePreview } =
+        useItemTableListColumnResizeLiveState();
 
-            // Scale factor to fit all columns proportionally within the total container width
-            const scaleFactor = totalContainerWidth / totalReferenceWidth;
+    const columnResizeLiveValue = useMemo(
+        () => ({
+            clearColumnResizePreview,
+            scheduleColumnResizePreview,
+        }),
+        [clearColumnResizePreview, scheduleColumnResizePreview],
+    );
 
-            // Apply scale factor to all columns proportionally and round to integers
-            const scaledWidths = baseWidths.map((width) => Math.round(width * scaleFactor));
-
-            // Adjust for rounding errors: ensure total equals totalContainerWidth
-            const totalScaled = scaledWidths.reduce((sum, width) => sum + width, 0);
-            const difference = totalContainerWidth - totalScaled;
-
-            if (difference !== 0 && scaledWidths.length > 0) {
-                // Distribute the difference to the largest columns
-                const sortedIndices = scaledWidths
-                    .map((width, idx) => ({ idx, width }))
-                    .sort((a, b) => b.width - a.width);
-
-                const adjustmentPerColumn = Math.sign(difference);
-                const adjustmentCount = Math.abs(difference);
-
-                for (let i = 0; i < adjustmentCount && i < sortedIndices.length; i++) {
-                    scaledWidths[sortedIndices[i].idx] += adjustmentPerColumn;
-                }
-            }
-
-            return scaledWidths;
+    const displayColumnWidths = useMemo(() => {
+        if (!columnResizePreview) {
+            return calculatedColumnWidths;
         }
-
-        // Original behavior: distribute extra space to auto-size columns
-        const distributed = baseWidths.slice();
-
-        const unpinnedIndices: number[] = [];
-        const autoUnpinnedIndices: number[] = [];
-
-        parsedColumns.forEach((col, idx) => {
-            if (col.pinned === null) {
-                unpinnedIndices.push(idx);
-                if (col.autoSize) {
-                    autoUnpinnedIndices.push(idx);
-                }
-            }
-        });
-
-        if (unpinnedIndices.length === 0 || autoUnpinnedIndices.length === 0) {
-            return distributed.map((width) => Math.round(width));
+        const next = calculatedColumnWidths.slice();
+        const { columnIndex, width } = columnResizePreview;
+        if (columnIndex >= 0 && columnIndex < next.length) {
+            next[columnIndex] = width;
         }
+        return next;
+    }, [calculatedColumnWidths, columnResizePreview]);
 
-        const unpinnedBaseTotal = unpinnedIndices.reduce((sum, idx) => sum + baseWidths[idx], 0);
+    const playerContext = usePlayer();
 
-        // Distribute only when there is extra space within the center container
-        const extra = Math.max(0, centerContainerWidth - unpinnedBaseTotal);
-        if (extra <= 0) {
-            return distributed.map((width) => Math.round(width));
-        }
+    const {
+        dataWithGroups: dataWithGroupsFromModel,
+        groupHeaderRowCount: groupHeaderRowCountFromModel,
+    } = useTableRowModel({
+        data,
+        enableHeader,
+        groups,
+    });
 
-        const extraPer = extra / autoUnpinnedIndices.length;
-        autoUnpinnedIndices.forEach((idx) => {
-            distributed[idx] = Math.round(baseWidths[idx] + extraPer);
-        });
+    const shouldUseAccessor = typeof getItem === 'function' && typeof itemCount === 'number';
 
-        // Round all widths to integers
-        return distributed.map((width) => Math.round(width));
-    }, [parsedColumns, centerContainerWidth, autoFitColumns, totalContainerWidth]);
+    // Avoid constructing a massive row-model array for infinite lists.
+    // Cell renderers use `getRowItem` accessor when provided.
+    const dataWithGroups = useMemo<(null | unknown)[]>(() => {
+        if (!shouldUseAccessor) return dataWithGroupsFromModel;
+        return enableHeader ? [null] : [];
+    }, [dataWithGroupsFromModel, enableHeader, shouldUseAccessor]);
 
-    const pinnedLeftColumnCount = parsedColumns.filter((col) => col.pinned === 'left').length;
-    const pinnedRightColumnCount = parsedColumns.filter((col) => col.pinned === 'right').length;
+    const groupHeaderRowCount = useMemo(() => {
+        if (!shouldUseAccessor) return groupHeaderRowCountFromModel;
+        return groups?.length ? groups.length : 0;
+    }, [groupHeaderRowCountFromModel, groups, shouldUseAccessor]);
 
     const pinnedRowCount = enableHeader ? 1 : 0;
 
-    // Calculate group header row count - each group has one header row
-    const groupHeaderRowCount = useMemo(() => {
-        if (!groups || groups.length === 0) return 0;
-        return groups.length;
-    }, [groups]);
-
     // Group headers are inserted at specific indexes, so they add to the total row count
     const totalRowCount = totalItemCount - pinnedRowCount + groupHeaderRowCount;
-    const totalColumnCount = columnCount - pinnedLeftColumnCount - pinnedRightColumnCount;
     const pinnedRowRef = useRef<HTMLDivElement>(null);
     const rowRef = useRef<HTMLDivElement>(null);
     const pinnedLeftColumnRef = useRef<HTMLDivElement>(null);
     const pinnedRightColumnRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const mergedRowRef = useMergedRef(rowRef, scrollContainerRef);
-    const [showLeftShadow, setShowLeftShadow] = useState(false);
-    const [showRightShadow, setShowRightShadow] = useState(false);
-    const [showTopShadow, setShowTopShadow] = useState(false);
+    const scrollShadowStore = useMemo(() => createTableScrollShadowStore(), []);
     const handleRef = useRef<ItemListHandle | null>(null);
     const { focused, ref: focusRef } = useFocusWithin();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const mergedContainerRef = useMergedRef(containerRef, focusRef);
 
-    const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
-    const stickyGroupRowRef = useRef<HTMLDivElement | null>(null);
-    const stickyHeaderLeftRef = useRef<HTMLDivElement | null>(null);
-    const stickyHeaderMainRef = useRef<HTMLDivElement | null>(null);
-    const stickyHeaderRightRef = useRef<HTMLDivElement | null>(null);
-
-    const { shouldShowStickyHeader, stickyTop } = useStickyTableHeader({
-        containerRef: containerRef,
-        enabled: enableHeader && enableStickyHeader,
-        headerRef: pinnedRowRef,
-        mainGridRef: rowRef,
-        pinnedLeftColumnRef,
-        pinnedRightColumnRef,
-        stickyHeaderMainRef,
+    useContainerWidthTracking({
+        autoFitColumns,
+        containerRef,
+        rowRef,
+        setCenterContainerWidth,
+        setTotalContainerWidth,
     });
-
-    // Update position and width of sticky header (scroll sync is handled in the hook)
-    useEffect(() => {
-        if (!shouldShowStickyHeader || !stickyHeaderRef.current || !containerRef.current) {
-            return;
-        }
-
-        const stickyHeader = stickyHeaderRef.current;
-        const container = containerRef.current;
-
-        const updatePosition = () => {
-            const containerRect = container.getBoundingClientRect();
-            stickyHeader.style.left = `${containerRect.left}px`;
-            stickyHeader.style.width = `${containerRect.width}px`;
-        };
-
-        updatePosition();
-
-        window.addEventListener('resize', updatePosition);
-        window.addEventListener('scroll', updatePosition, true);
-
-        return () => {
-            window.removeEventListener('resize', updatePosition);
-            window.removeEventListener('scroll', updatePosition, true);
-        };
-    }, [shouldShowStickyHeader]);
-
-    useEffect(() => {
-        const el = rowRef.current;
-        if (!el) return;
-
-        const updateWidth = () => {
-            setCenterContainerWidth(el.clientWidth || 0);
-        };
-
-        updateWidth();
-
-        const resizeObserver = new ResizeObserver(() => {
-            updateWidth();
-        });
-
-        resizeObserver.observe(el);
-
-        return () => {
-            resizeObserver.disconnect();
-        };
-    }, []);
-
-    // Track total container width for autoSizeColumns
-    useEffect(() => {
-        const el = containerRef.current;
-        if (!el || !autoFitColumns) return;
-
-        const updateWidth = () => {
-            setTotalContainerWidth(el.clientWidth || 0);
-        };
-
-        updateWidth();
-
-        const resizeObserver = new ResizeObserver(() => {
-            updateWidth();
-        });
-
-        resizeObserver.observe(el);
-
-        return () => {
-            resizeObserver.disconnect();
-        };
-    }, [autoFitColumns]);
 
     const onScrollEndRef = useRef<ItemTableListProps['onScrollEnd']>(onScrollEnd);
     useEffect(() => {
         onScrollEndRef.current = onScrollEnd;
     }, [onScrollEnd]);
 
-    const scrollToTableOffset = useCallback((offset: number) => {
-        const mainContainer = rowRef.current?.childNodes[0] as HTMLDivElement | undefined;
-        const pinnedLeftContainer = pinnedLeftColumnRef.current?.childNodes[0] as
-            | HTMLDivElement
-            | undefined;
-        const pinnedRightContainer = pinnedRightColumnRef.current?.childNodes[0] as
-            | HTMLDivElement
-            | undefined;
-
-        const behavior = 'instant';
-
-        if (mainContainer) {
-            mainContainer.scrollTo({ behavior, top: offset });
-        }
-        if (pinnedLeftContainer) {
-            pinnedLeftContainer.scrollTo({ behavior, top: offset });
-        }
-        if (pinnedRightContainer) {
-            pinnedRightContainer.scrollTo({ behavior, top: offset });
-        }
-    }, []);
-
-    const DEFAULT_ROW_HEIGHT =
-        size === 'compact'
-            ? TableItemSize.COMPACT
-            : size === 'large'
-              ? TableItemSize.LARGE
-              : TableItemSize.DEFAULT;
-
-    const calculateScrollTopForIndex = useCallback(
-        (index: number) => {
-            const adjustedIndex = enableHeader ? Math.max(0, index - 1) : index;
-            let scrollTop = 0;
-
-            // Create a minimal mock cellProps for rowHeight function calls if needed
-            const mockCellProps: TableItemProps = {
-                cellPadding,
-                columns: parsedColumns,
-                controls: {} as ItemControls,
-                data: enableHeader ? [null, ...data] : data,
-                enableAlternateRowColors,
-                enableExpansion,
-                enableHeader,
-                enableHorizontalBorders,
-                enableRowHoverHighlight,
-                enableSelection,
-                enableVerticalBorders,
-                getRowHeight: () => DEFAULT_ROW_HEIGHT,
-                internalState: {} as ItemListStateActions,
-                itemType,
-                playerContext,
-                size,
-                tableId,
-            };
-
-            for (let i = 0; i < adjustedIndex; i++) {
-                let height: number;
-                if (typeof rowHeight === 'number') {
-                    height = rowHeight;
-                } else if (typeof rowHeight === 'function') {
-                    height = rowHeight(i, mockCellProps);
-                } else {
-                    height = DEFAULT_ROW_HEIGHT;
-                }
-                scrollTop += height;
-            }
-            return scrollTop;
-        },
-        [
-            enableHeader,
-            cellPadding,
-            parsedColumns,
-            data,
-            enableAlternateRowColors,
-            enableExpansion,
-            enableHorizontalBorders,
-            enableRowHoverHighlight,
-            enableSelection,
-            enableVerticalBorders,
-            itemType,
-            playerContext,
-            size,
-            tableId,
-            DEFAULT_ROW_HEIGHT,
-            rowHeight,
-        ],
+    const hasAlbumGroupColumn = useMemo(
+        () => parsedColumns.some((col) => col.id === TableColumn.ALBUM_GROUP),
+        [parsedColumns],
     );
-
-    const scrollToTableIndex = useCallback(
-        (index: number, options?: { align?: 'bottom' | 'center' | 'top' }) => {
-            const mainContainer = rowRef.current?.childNodes[0] as HTMLDivElement | undefined;
-            if (!mainContainer) return;
-
-            const viewportHeight = mainContainer.clientHeight;
-            const align = options?.align || 'top';
-
-            // Calculate the base scroll offset (top of the row)
-            let offset = calculateScrollTopForIndex(index);
-
-            // Calculate row height for the target index
-            const adjustedIndex = enableHeader ? Math.max(0, index - 1) : index;
-            const mockCellProps: TableItemProps = {
-                cellPadding,
-                columns: parsedColumns,
-                controls: {} as ItemControls,
-                data: enableHeader ? [null, ...data] : data,
-                enableAlternateRowColors,
-                enableExpansion,
-                enableHeader,
-                enableHorizontalBorders,
-                enableRowHoverHighlight,
-                enableSelection,
-                enableVerticalBorders,
-                getRowHeight: () => DEFAULT_ROW_HEIGHT,
-                internalState: {} as ItemListStateActions,
-                itemType,
-                playerContext,
-                size,
-                tableId,
-            };
-
-            let targetRowHeight: number;
-            if (typeof rowHeight === 'number') {
-                targetRowHeight = rowHeight;
-            } else if (typeof rowHeight === 'function') {
-                targetRowHeight = rowHeight(adjustedIndex, mockCellProps);
-            } else {
-                targetRowHeight = DEFAULT_ROW_HEIGHT;
-            }
-
-            // Adjust offset based on alignment
-            if (align === 'center') {
-                offset = offset - viewportHeight / 2 + targetRowHeight / 2;
-            } else if (align === 'bottom') {
-                offset = offset - viewportHeight + targetRowHeight;
-            }
-            // 'top' uses the base offset
-
-            // Ensure offset is not negative
-            offset = Math.max(0, offset);
-
-            scrollToTableOffset(offset);
-        },
-        [
-            calculateScrollTopForIndex,
-            scrollToTableOffset,
-            enableHeader,
-            cellPadding,
-            parsedColumns,
-            data,
-            enableAlternateRowColors,
-            enableExpansion,
-            enableHorizontalBorders,
-            enableRowHoverHighlight,
-            enableSelection,
-            enableVerticalBorders,
-            itemType,
-            playerContext,
-            size,
-            tableId,
-            DEFAULT_ROW_HEIGHT,
-            rowHeight,
-        ],
-    );
-
-    // Main grid overlayscrollbars - only handle X-axis if right-pinned columns exist
-    const [initialize, osInstance] = useOverlayScrollbars({
-        defer: false,
-        events: {
-            initialized(osInstance) {
-                const { viewport } = osInstance.elements();
-                viewport.style.overflowX = `var(--os-viewport-overflow-x)`;
-
-                if (pinnedRightColumnCount > 0) {
-                    viewport.style.overflowY = 'auto';
-                } else {
-                    viewport.style.overflowY = `var(--os-viewport-overflow-y)`;
-                }
-            },
-        },
-        options: {
-            overflow: {
-                x: 'scroll',
-                y: pinnedRightColumnCount > 0 ? 'hidden' : 'scroll',
-            },
-            paddingAbsolute: true,
-            scrollbars: {
-                autoHide: 'leave',
-                autoHideDelay: 500,
-                pointers: ['mouse', 'pen', 'touch'],
-                theme: 'feishin-os-scrollbar',
-            },
-        },
-    });
-
-    // Right pinned columns overlayscrollbars - enable Y-axis scroll when right-pinned columns exist
-    const [initializeRightPinned, osInstanceRightPinned] = useOverlayScrollbars({
-        defer: false,
-        events: {
-            initialized(osInstance) {
-                const { viewport } = osInstance.elements();
-                viewport.style.overflowX = `var(--os-viewport-overflow-x)`;
-                viewport.style.overflowY = `var(--os-viewport-overflow-y)`;
-            },
-        },
-        options: {
-            overflow: { x: 'hidden', y: 'scroll' },
-            paddingAbsolute: true,
-            scrollbars: {
-                autoHide: 'leave',
-                autoHideDelay: 500,
-                pointers: ['mouse', 'pen', 'touch'],
-                theme: 'feishin-os-scrollbar',
-            },
-        },
-    });
-
-    useEffect(() => {
-        const { current: root } = scrollContainerRef;
-
-        if (!root || !root.firstElementChild) {
-            return;
-        }
-
-        const viewport = root.firstElementChild as HTMLElement;
-
-        initialize({
-            elements: { viewport },
-            target: root,
-        });
-
-        if (enableDrag) {
-            autoScrollForElements({
-                canScroll: () => true,
-                element: viewport,
-                getAllowedAxis: () => 'vertical',
-                getConfiguration: () => ({ maxScrollSpeed: 'fast' }),
-            });
-        }
-
-        return () => {
-            try {
-                const instance = osInstance();
-                const { current: root } = scrollContainerRef;
-
-                // Check if instance exists and elements are still connected to the DOM
-                if (instance && root) {
-                    const viewport = root.firstElementChild as HTMLElement;
-
-                    // Check if elements are still in the document
-                    const rootInDocument = document.contains(root);
-                    const viewportInDocument = viewport && document.contains(viewport);
-
-                    // Only destroy if elements are still in the document
-                    if (rootInDocument && viewportInDocument) {
-                        instance.destroy();
-                    }
-                }
-            } catch {
-                // Ignore error
-            }
-        };
-    }, [enableDrag, initialize, osInstance, pinnedRightColumnCount]);
-
-    useEffect(() => {
-        if (pinnedLeftColumnCount === 0) {
-            return;
-        }
-
-        const { current: root } = pinnedLeftColumnRef;
-
-        if (!root || !root.firstElementChild) {
-            return;
-        }
-
-        const viewport = root.firstElementChild as HTMLElement;
-
-        if (enableDrag) {
-            autoScrollForElements({
-                canScroll: () => true,
-                element: viewport,
-                getAllowedAxis: () => 'vertical',
-                getConfiguration: () => ({ maxScrollSpeed: 'fast' }),
-            });
-        }
-    }, [enableDrag, pinnedLeftColumnCount]);
-
-    // Initialize overlayscrollbars for right pinned columns
-    useEffect(() => {
-        if (pinnedRightColumnCount === 0) {
-            return;
-        }
-
-        const { current: root } = pinnedRightColumnRef;
-
-        if (!root || !root.firstElementChild) {
-            return;
-        }
-
-        const viewport = root.firstElementChild as HTMLElement;
-
-        initializeRightPinned({
-            elements: { viewport },
-            target: root,
-        });
-
-        if (enableDrag) {
-            autoScrollForElements({
-                canScroll: () => true,
-                element: viewport,
-                getAllowedAxis: () => 'vertical',
-                getConfiguration: () => ({ maxScrollSpeed: 'fast' }),
-            });
-        }
-
-        return () => {
-            try {
-                const instance = osInstanceRightPinned();
-                const { current: root } = pinnedRightColumnRef;
-
-                if (instance && root) {
-                    const viewport = root.firstElementChild as HTMLElement;
-
-                    const rootInDocument = document.contains(root);
-                    const viewportInDocument = viewport && document.contains(viewport);
-
-                    if (rootInDocument && viewportInDocument) {
-                        instance.destroy();
-                    }
-                }
-            } catch {
-                // Ignore error
-            }
-        };
-    }, [enableDrag, initializeRightPinned, osInstanceRightPinned, pinnedRightColumnCount]);
-
-    useEffect(() => {
-        const header = pinnedRowRef.current?.childNodes[0] as HTMLDivElement;
-        const row = rowRef.current?.childNodes[0] as HTMLDivElement;
-        const pinnedLeft = pinnedLeftColumnRef.current?.childNodes[0] as HTMLDivElement;
-        const pinnedRight = pinnedRightColumnRef.current?.childNodes[0] as HTMLDivElement;
-
-        if (row) {
-            // Ensure all containers have the same height
-            const syncHeights = () => {
-                const rowHeight = row.scrollHeight;
-                let targetHeight = rowHeight;
-
-                if (pinnedLeft) {
-                    const pinnedLeftHeight = pinnedLeft.scrollHeight;
-                    targetHeight = Math.max(targetHeight, pinnedLeftHeight);
-                }
-
-                if (pinnedRight) {
-                    const pinnedRightHeight = pinnedRight.scrollHeight;
-                    targetHeight = Math.max(targetHeight, pinnedRightHeight);
-                }
-
-                // Set consistent heights for all elements
-                if (pinnedLeft && pinnedLeft.style.height !== `${targetHeight}px`) {
-                    pinnedLeft.style.height = `${targetHeight}px`;
-                }
-                if (pinnedRight && pinnedRight.style.height !== `${targetHeight}px`) {
-                    pinnedRight.style.height = `${targetHeight}px`;
-                }
-                if (row.style.height !== `${targetHeight}px`) {
-                    row.style.height = `${targetHeight}px`;
-                }
-            };
-
-            const timeoutId = setTimeout(syncHeights, 0);
-
-            const activeElement = { element: null } as { element: HTMLDivElement | null };
-            const scrollingElements = new Set<HTMLDivElement>();
-            const scrollTimeouts = new Map<HTMLDivElement, NodeJS.Timeout>();
-
-            const setActiveElement = (e: HTMLElementEventMap['pointermove']) => {
-                activeElement.element = e.currentTarget as HTMLDivElement;
-            };
-            const setActiveElementFromWheel = (e: HTMLElementEventMap['wheel']) => {
-                activeElement.element = e.currentTarget as HTMLDivElement;
-            };
-
-            // Track which elements are actively scrolling
-            const markElementAsScrolling = (element: HTMLDivElement) => {
-                scrollingElements.add(element);
-
-                // Clear existing timeout for this element
-                const existingTimeout = scrollTimeouts.get(element);
-                if (existingTimeout) {
-                    clearTimeout(existingTimeout);
-                }
-
-                // Set a timeout to remove the element from scrolling set
-                const timeout = setTimeout(() => {
-                    scrollingElements.delete(element);
-
-                    // Use right pinned column scroll position if right-pinned columns exist
-                    const hasRightPinnedColumns = pinnedRightColumnCount > 0;
-                    const scrollElement = hasRightPinnedColumns && pinnedRight ? pinnedRight : row;
-
-                    if (scrollElement && onScrollEndRef.current) {
-                        onScrollEndRef.current(
-                            scrollElement.scrollTop,
-                            handleRef.current ?? (undefined as any),
-                        );
-                    }
-
-                    scrollTimeouts.delete(element);
-                }, 150);
-
-                scrollTimeouts.set(element, timeout);
-            };
-
-            const syncScroll = (e: HTMLElementEventMap['scroll']) => {
-                const currentElement = e.currentTarget as HTMLDivElement;
-
-                markElementAsScrolling(currentElement);
-
-                // Allow sync if:
-                // 1. Current element is the active element (normal case)
-                // 2. Current element is actively scrolling (handles autoscroll and other continuous scrolling)
-                const shouldSync =
-                    currentElement === activeElement.element ||
-                    scrollingElements.has(currentElement);
-
-                if (!shouldSync) {
-                    return;
-                }
-
-                const scrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
-                const scrollLeft = (e.currentTarget as HTMLDivElement).scrollLeft;
-
-                // Prevent recursive scroll events
-                const isScrolling = {
-                    header: false,
-                    pinnedLeft: false,
-                    pinnedRight: false,
-                    row: false,
-                };
-
-                const hasRightPinnedColumns = pinnedRightColumnCount > 0;
-
-                // Sync horizontal scroll between header and main content (only if header exists)
-                if (header && e.currentTarget === header && !isScrolling.row) {
-                    isScrolling.row = true;
-                    row.scrollTo({
-                        behavior: 'instant',
-                        left: scrollLeft,
-                    });
-                    isScrolling.row = false;
-                }
-
-                // Sync from main content to header and sticky columns
-                if (
-                    e.currentTarget === row &&
-                    !isScrolling.header &&
-                    !isScrolling.pinnedLeft &&
-                    !isScrolling.pinnedRight
-                ) {
-                    if (header) {
-                        isScrolling.header = true;
-                        header.scrollTo({
-                            behavior: 'instant',
-                            left: scrollLeft,
-                        });
-                    }
-                    // When right-pinned columns exist, sync Y-scroll to right pinned column instead of from main grid
-                    if (hasRightPinnedColumns && pinnedRight) {
-                        isScrolling.pinnedRight = true;
-                        pinnedRight.scrollTo({
-                            behavior: 'instant',
-                            top: scrollTop,
-                        });
-                        isScrolling.pinnedRight = false;
-                    } else {
-                        // When no right-pinned columns, sync Y-scroll normally
-                        if (pinnedLeft) {
-                            isScrolling.pinnedLeft = true;
-                            pinnedLeft.scrollTo({
-                                behavior: 'instant',
-                                top: scrollTop,
-                            });
-                        }
-                        if (pinnedRight) {
-                            isScrolling.pinnedRight = true;
-                            pinnedRight.scrollTo({
-                                behavior: 'instant',
-                                top: scrollTop,
-                            });
-                        }
-                    }
-                    isScrolling.header = false;
-                    isScrolling.pinnedLeft = false;
-                }
-
-                // Sync vertical scroll between left pinned column and main content (only if pinnedLeft exists)
-                if (pinnedLeft && e.currentTarget === pinnedLeft && !isScrolling.row) {
-                    // When right-pinned columns exist, sync Y-scroll to right pinned column instead of main grid
-                    if (hasRightPinnedColumns && pinnedRight) {
-                        isScrolling.pinnedRight = true;
-                        pinnedRight.scrollTo({
-                            behavior: 'instant',
-                            top: scrollTop,
-                        });
-                        isScrolling.pinnedRight = false;
-                    } else {
-                        isScrolling.row = true;
-                        row.scrollTo({
-                            behavior: 'instant',
-                            top: scrollTop,
-                        });
-                        isScrolling.row = false;
-                    }
-                }
-
-                // Sync vertical scroll from right pinned column to main content and left pinned column
-                // When right-pinned columns exist, this is the source of truth for Y-scroll
-                if (pinnedRight && e.currentTarget === pinnedRight && !isScrolling.row) {
-                    isScrolling.row = true;
-                    row.scrollTo({
-                        behavior: 'instant',
-                        top: scrollTop,
-                    });
-                    isScrolling.row = false;
-                    if (pinnedLeft) {
-                        isScrolling.pinnedLeft = true;
-                        pinnedLeft.scrollTo({
-                            behavior: 'instant',
-                            top: scrollTop,
-                        });
-                        isScrolling.pinnedLeft = false;
-                    }
-                }
-            };
-
-            // Add event listeners for elements that exist
-            if (header) {
-                header.addEventListener('pointermove', setActiveElement);
-                header.addEventListener('wheel', setActiveElementFromWheel);
-                header.addEventListener('scroll', syncScroll);
-            }
-            row.addEventListener('pointermove', setActiveElement);
-            row.addEventListener('wheel', setActiveElementFromWheel);
-            row.addEventListener('scroll', syncScroll);
-            if (pinnedLeft) {
-                pinnedLeft.addEventListener('pointermove', setActiveElement);
-                pinnedLeft.addEventListener('wheel', setActiveElementFromWheel);
-                pinnedLeft.addEventListener('scroll', syncScroll);
-            }
-            if (pinnedRight) {
-                pinnedRight.addEventListener('pointermove', setActiveElement);
-                pinnedRight.addEventListener('wheel', setActiveElementFromWheel);
-                pinnedRight.addEventListener('scroll', syncScroll);
-            }
-
-            // Add resize observer to maintain height sync
-            const resizeObserver = new ResizeObserver(() => {
-                syncHeights();
-            });
-
-            resizeObserver.observe(row);
-            if (pinnedLeft) {
-                resizeObserver.observe(pinnedLeft);
-            }
-            if (pinnedRight) {
-                resizeObserver.observe(pinnedRight);
-            }
-
-            return () => {
-                clearTimeout(timeoutId);
-                scrollTimeouts.forEach((timeout) => clearTimeout(timeout));
-                scrollTimeouts.clear();
-                scrollingElements.clear();
-
-                if (header) {
-                    header.removeEventListener('pointermove', setActiveElement);
-                    header.removeEventListener('wheel', setActiveElementFromWheel);
-                    header.removeEventListener('scroll', syncScroll);
-                }
-                row.removeEventListener('pointermove', setActiveElement);
-                row.removeEventListener('wheel', setActiveElementFromWheel);
-                row.removeEventListener('scroll', syncScroll);
-                if (pinnedLeft) {
-                    pinnedLeft.removeEventListener('pointermove', setActiveElement);
-                    pinnedLeft.removeEventListener('wheel', setActiveElementFromWheel);
-                    pinnedLeft.removeEventListener('scroll', syncScroll);
-                }
-                if (pinnedRight) {
-                    pinnedRight.removeEventListener('pointermove', setActiveElement);
-                    pinnedRight.removeEventListener('wheel', setActiveElementFromWheel);
-                    pinnedRight.removeEventListener('scroll', syncScroll);
-                }
-                resizeObserver.disconnect();
-            };
-        }
-
-        return undefined;
-    }, [pinnedLeftColumnCount, pinnedRightColumnCount]);
-
-    // Handle left and right shadow visibility based on horizontal scroll
-    useEffect(() => {
-        const row = rowRef.current?.childNodes[0] as HTMLDivElement;
-
-        if (!row) {
-            const timeout = setTimeout(() => {
-                setShowLeftShadow(false);
-                setShowRightShadow(false);
-            }, 0);
-
-            return () => clearTimeout(timeout);
-        }
-
-        const checkScrollPosition = () => {
-            const scrollLeft = row.scrollLeft;
-            const maxScrollLeft = row.scrollWidth - row.clientWidth;
-
-            setShowLeftShadow(pinnedLeftColumnCount > 0 && scrollLeft > 0);
-            setShowRightShadow(pinnedRightColumnCount > 0 && scrollLeft < maxScrollLeft);
-        };
-
-        checkScrollPosition();
-
-        row.addEventListener('scroll', checkScrollPosition);
-
-        return () => {
-            row.removeEventListener('scroll', checkScrollPosition);
-        };
-    }, [pinnedLeftColumnCount, pinnedRightColumnCount]);
-
-    // Handle top shadow visibility based on vertical scroll
-    useEffect(() => {
-        const row = rowRef.current?.childNodes[0] as HTMLDivElement;
-        const pinnedRight = pinnedRightColumnRef.current?.childNodes[0] as HTMLDivElement;
-
-        if (!row || !enableHeader) {
-            const timeout = setTimeout(() => {
-                setShowTopShadow(false);
-            }, 0);
-
-            return () => clearTimeout(timeout);
-        }
-
-        // When right-pinned columns exist, use right pinned column's scroll position
-        const scrollElement = pinnedRightColumnCount > 0 && pinnedRight ? pinnedRight : row;
-
-        const checkScrollPosition = () => {
-            const currentScrollTop = scrollElement.scrollTop;
-            setShowTopShadow(currentScrollTop > 0);
-        };
-
-        checkScrollPosition();
-
-        scrollElement.addEventListener('scroll', checkScrollPosition);
-
-        return () => {
-            scrollElement.removeEventListener('scroll', checkScrollPosition);
-        };
-    }, [enableHeader, pinnedRightColumnCount]);
 
     const getRowHeight = useCallback(
         (index: number, cellProps: TableItemProps) => {
-            const height = size === 'compact' ? 40 : size === 'large' ? 88 : 64;
+            const height =
+                size === 'compact'
+                    ? TableItemSize.COMPACT
+                    : size === 'large'
+                      ? TableItemSize.LARGE
+                      : TableItemSize.DEFAULT;
 
             const baseHeight =
                 typeof rowHeight === 'number' ? rowHeight : rowHeight?.(index, cellProps) || height;
@@ -1607,15 +1434,185 @@ const BaseItemTableList = ({
                 return headerHeight;
             }
 
+            // Grow the group's LAST row when the album image or wrapped album
+            // info (title + artists + controls) needs more than the standard
+            // combined row height. Other rows keep their standard height.
+            if (
+                cellProps?.hasAlbumGroupColumn &&
+                isLastInAlbumGroup(
+                    index,
+                    cellProps.getRowItem,
+                    cellProps.enableHeader,
+                    cellProps.data.length,
+                )
+            ) {
+                const item = cellProps.getRowItem?.(index) as null | undefined | { album?: string };
+                if (item?.album) {
+                    const groupRowCount = getAlbumGroupRowCount(
+                        index,
+                        cellProps.getRowItem,
+                        cellProps.enableHeader,
+                        cellProps.data.length,
+                    );
+                    const groupStartRowIndex = getAlbumGroupStartRowIndex(
+                        index,
+                        cellProps.getRowItem,
+                        cellProps.enableHeader,
+                    );
+                    const groupStartItem = cellProps.getRowItem?.(groupStartRowIndex);
+                    const groupHeightKey = getAlbumGroupHeightKey(groupStartItem, groupRowCount);
+                    const measuredContentHeight = groupHeightKey
+                        ? cellProps.albumGroupContentHeights?.get(groupHeightKey)
+                        : undefined;
+                    // Prefer measured info height once available; otherwise reserve with a
+                    // stable estimate so newly virtualized groups do not jump after mount.
+                    // Controls-row min-height covers favorites/ratings before the album loads.
+                    const contentHeight = measuredContentHeight ?? estimatedAlbumGroupContentHeight;
+                    const totalGroupHeight = getAlbumGroupSpanHeight(
+                        groupRowCount,
+                        baseHeight,
+                        albumGroupImageSize,
+                        contentHeight,
+                        { isVertical: albumGroupVerticalLayout },
+                    );
+                    const lastRowHeight = totalGroupHeight - (groupRowCount - 1) * baseHeight;
+                    if (lastRowHeight > baseHeight) {
+                        return lastRowHeight;
+                    }
+                }
+            }
+
             return baseHeight;
         },
-        [enableHeader, headerHeight, rowHeight, pinnedRowCount, size],
+        [
+            albumGroupImageSize,
+            albumGroupVerticalLayout,
+            enableHeader,
+            estimatedAlbumGroupContentHeight,
+            headerHeight,
+            rowHeight,
+            pinnedRowCount,
+            size,
+        ],
     );
+
+    const scrollCellProps = useMemo<TableItemProps>(
+        () => ({
+            albumGroupContentHeights,
+            albumGroupImageSize,
+            albumGroupVerticalLayout,
+            cellPadding,
+            columns: parsedColumns,
+            controls: {} as ItemControls,
+            data: dataWithGroups,
+            enableAlternateRowColors,
+            enableExpansion,
+            enableHeader,
+            enableHorizontalBorders,
+            enableRowHoverHighlight,
+            enableSelection,
+            enableVerticalBorders,
+            estimatedAlbumGroupContentHeight,
+            getRowHeight,
+            getRowItem: (rowIndex: number) => {
+                if (shouldUseAccessor && getItem) {
+                    if (enableHeader && rowIndex === 0) {
+                        return null;
+                    }
+
+                    const dataIndex = enableHeader ? rowIndex - 1 : rowIndex;
+                    return getItem(dataIndex);
+                }
+
+                return dataWithGroups[rowIndex];
+            },
+            hasAlbumGroupColumn,
+            internalState: {} as ItemListStateActions,
+            itemType,
+            playerContext,
+            size,
+            tableId,
+        }),
+        [
+            albumGroupContentHeights,
+            albumGroupImageSize,
+            albumGroupVerticalLayout,
+            cellPadding,
+            dataWithGroups,
+            enableAlternateRowColors,
+            enableExpansion,
+            enableHeader,
+            enableHorizontalBorders,
+            enableRowHoverHighlight,
+            enableSelection,
+            enableVerticalBorders,
+            estimatedAlbumGroupContentHeight,
+            getItem,
+            getRowHeight,
+            hasAlbumGroupColumn,
+            itemType,
+            parsedColumns,
+            playerContext,
+            shouldUseAccessor,
+            size,
+            tableId,
+        ],
+    );
+
+    const {
+        calculateScrollTopForIndex,
+        getRowHeightAtIndex,
+        scrollToTableIndex,
+        scrollToTableOffset,
+    } = useTableScrollToIndex({
+        albumGroupContentHeights,
+        autoScrollToActiveRow,
+        enableHeader,
+        getRowHeight,
+        hasAlbumGroupColumn,
+        pinnedLeftColumnRef,
+        pinnedRightColumnRef,
+        pinnedRowCount,
+        rowRef,
+        scrollCellProps,
+    });
+
+    const scrollSyncKey = useMemo(
+        () =>
+            parsedColumns
+                .map(
+                    (col) =>
+                        `${col.id}:${col.pinned ?? 'none'}:${col.width}:${col.isEnabled !== false}`,
+                )
+                .join('|'),
+        [parsedColumns],
+    );
+
+    useTablePaneSync({
+        enableDrag,
+        enableDragScroll,
+        handleRef,
+        onScrollEndRef,
+        pinnedLeftColumnCount,
+        pinnedLeftColumnRef,
+        pinnedRightColumnCount,
+        pinnedRightColumnRef,
+        pinnedRowRef,
+        rowRef,
+        scrollContainerRef,
+        scrollShadowStore,
+        scrollSyncKey,
+    });
 
     // Create a wrapper for getRowHeight that doesn't require cellProps (for sticky group rows hook)
     const getRowHeightWrapper = useCallback(
         (index: number) => {
-            const height = size === 'compact' ? 40 : size === 'large' ? 88 : 64;
+            const height =
+                size === 'compact'
+                    ? TableItemSize.COMPACT
+                    : size === 'large'
+                      ? TableItemSize.LARGE
+                      : TableItemSize.DEFAULT;
 
             const baseHeight = typeof rowHeight === 'number' ? rowHeight : height;
 
@@ -1629,100 +1626,28 @@ const BaseItemTableList = ({
         [enableHeader, headerHeight, rowHeight, pinnedRowCount, size],
     );
 
-    const {
-        shouldShowStickyGroupRow,
-        stickyGroupIndex,
-        stickyTop: stickyGroupTop,
-    } = useStickyTableGroupRows({
-        containerRef: containerRef,
-        enabled: enableStickyGroupRows && !!groups && groups.length > 0,
-        getRowHeight: getRowHeightWrapper,
-        groups,
-        headerHeight,
-        mainGridRef: rowRef,
-        shouldShowStickyHeader,
-        stickyHeaderTop: stickyTop,
-    });
-
-    // Show sticky group row whenever it should be shown
-    const shouldRenderStickyGroupRow = shouldShowStickyGroupRow;
-
-    // Update position and width of sticky group row
-    useEffect(() => {
-        if (!shouldRenderStickyGroupRow || !stickyGroupRowRef.current || !containerRef.current) {
-            return;
-        }
-
-        const stickyGroupRow = stickyGroupRowRef.current;
-        const container = containerRef.current;
-
-        const updatePosition = () => {
-            const containerRect = container.getBoundingClientRect();
-            stickyGroupRow.style.left = `${containerRect.left}px`;
-            stickyGroupRow.style.width = `${containerRect.width}px`;
-        };
-
-        updatePosition();
-
-        window.addEventListener('resize', updatePosition);
-        window.addEventListener('scroll', updatePosition, true);
-
-        return () => {
-            window.removeEventListener('resize', updatePosition);
-            window.removeEventListener('scroll', updatePosition, true);
-        };
-    }, [shouldRenderStickyGroupRow]);
+    const dataRef = useRef(data);
+    const getLoadedItemsRef = useRef(getLoadedItems);
+    dataRef.current = data;
+    getLoadedItemsRef.current = getLoadedItems;
 
     const getDataFn = useCallback(() => {
-        const result: (null | unknown)[] = enableHeader ? [null] : [];
-
-        if (!groups || groups.length === 0) {
-            // No groups, just add all data
-            result.push(...data);
-            return result;
+        const loadedItems = getLoadedItemsRef.current?.();
+        if (loadedItems?.length) {
+            return loadedItems;
         }
-
-        // Calculate group header indexes based on itemCounts
-        const groupIndexes: number[] = [];
-        let cumulativeDataIndex = 0;
-        const headerOffset = enableHeader ? 1 : 0;
-
-        groups.forEach((group, groupIndex) => {
-            // Index = header offset + cumulative data index + number of previous group headers
-            const groupHeaderIndex = headerOffset + cumulativeDataIndex + groupIndex;
-            groupIndexes.push(groupHeaderIndex);
-            cumulativeDataIndex += group.itemCount;
-        });
-
-        let dataIndex = 0;
-        const startIndex = enableHeader ? 1 : 0;
-        let groupHeaderCount = 0;
-
-        for (
-            let rowIndex = startIndex;
-            rowIndex < startIndex + data.length + groupIndexes.length;
-            rowIndex++
-        ) {
-            const expectedGroupIndex = groupIndexes[groupHeaderCount];
-            if (expectedGroupIndex !== undefined && rowIndex === expectedGroupIndex) {
-                result.push(null);
-                groupHeaderCount++;
-            } else if (dataIndex < data.length) {
-                result.push(data[dataIndex]);
-                dataIndex++;
-            }
-        }
-        return result;
-    }, [data, enableHeader, groups]);
+        return dataRef.current ?? [];
+    }, []);
 
     const extractRowId = useMemo(() => createExtractRowId(getRowId), [getRowId]);
 
     const internalState = useItemListState(getDataFn, extractRowId);
 
-    // Helper function to get ItemListStateItemWithRequiredProperties (rowId is separate, not part of item)
     const getStateItem = useCallback(
         (item: any): ItemListStateItemWithRequiredProperties | null => {
-            if (!hasRequiredItemProperties(item)) return null;
+            if (!hasRequiredItemProperties(item)) {
+                return null;
+            }
             if (
                 typeof item === 'object' &&
                 item !== null &&
@@ -1736,162 +1661,41 @@ const BaseItemTableList = ({
         [],
     );
 
-    const handleKeyDown = useCallback(
-        (e: React.KeyboardEvent<HTMLDivElement>) => {
-            if (!enableSelection) return;
-            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-            e.preventDefault();
-            e.stopPropagation();
+    const { handleKeyDown } = useTableKeyboardNavigation({
+        calculateScrollTopForIndex,
+        data,
+        enableHeader,
+        enableSelection,
+        extractRowId,
+        getItem,
+        getItemIndex,
+        getRowHeightAtIndex,
+        getStateItem,
+        hasRequiredStateItemProperties,
+        internalState,
+        itemCount: baseItemCount,
+        pinnedRightColumnCount,
+        pinnedRightColumnRef,
+        rowRef,
+        scrollToTableIndex,
+    });
 
-            const selected = internalState.getSelected();
-            const validSelected = selected.filter(hasRequiredStateItemProperties);
-            let currentIndex = -1;
+    useTableInitialScroll({
+        initialTop,
+        scrollToTableIndex,
+        scrollToTableOffset,
+        startRowIndex,
+    });
 
-            if (validSelected.length > 0) {
-                const lastSelected = validSelected[validSelected.length - 1];
-                currentIndex = data.findIndex(
-                    (d) => hasRequiredItemProperties(d) && d.id === lastSelected.id,
-                );
-            }
-
-            let newIndex = 0;
-            if (currentIndex !== -1) {
-                newIndex =
-                    e.key === 'ArrowDown'
-                        ? Math.min(currentIndex + 1, data.length - 1)
-                        : Math.max(currentIndex - 1, 0);
-            }
-
-            const newItem: any = data[newIndex];
-            if (!newItem) return;
-
-            // Handle Shift + Arrow for incremental range selection (matches shift+click behavior)
-            if (e.shiftKey) {
-                const selectedItems = internalState.getSelected();
-                const validSelectedItems = selectedItems.filter(hasRequiredStateItemProperties);
-                const lastSelectedItem = validSelectedItems[validSelectedItems.length - 1];
-
-                if (lastSelectedItem) {
-                    // Find the indices of the last selected item and new item
-                    const lastRowId = lastSelectedItem.rowId;
-                    const lastIndex = data.findIndex((d) => {
-                        const rowId = extractRowId(d);
-                        return rowId === lastRowId;
-                    });
-
-                    if (lastIndex !== -1 && newIndex !== -1) {
-                        // Create range selection from last selected to new position
-                        const startIndex = Math.min(lastIndex, newIndex);
-                        const stopIndex = Math.max(lastIndex, newIndex);
-
-                        const rangeItems: ItemListStateItemWithRequiredProperties[] = [];
-                        for (let i = startIndex; i <= stopIndex; i++) {
-                            const rangeItem = data[i];
-                            const stateItem = getStateItem(rangeItem);
-                            if (stateItem && extractRowId(stateItem)) {
-                                rangeItems.push(stateItem);
-                            }
-                        }
-
-                        // Add range items to selection (matching shift+click behavior)
-                        const currentSelected = internalState.getSelected();
-                        const validSelected = currentSelected.filter(
-                            hasRequiredStateItemProperties,
-                        );
-                        const newSelected: ItemListStateItemWithRequiredProperties[] = [
-                            ...validSelected,
-                        ];
-                        rangeItems.forEach((rangeItem) => {
-                            const rangeRowId = extractRowId(rangeItem);
-                            if (
-                                rangeRowId &&
-                                !newSelected.some(
-                                    (selected) => extractRowId(selected) === rangeRowId,
-                                )
-                            ) {
-                                newSelected.push(rangeItem);
-                            }
-                        });
-
-                        // Ensure the last item in selection is the item at newIndex for incremental extension
-                        const newItemListItem = getStateItem(newItem);
-                        if (newItemListItem && extractRowId(newItemListItem)) {
-                            const newItemRowId = extractRowId(newItemListItem);
-                            // Remove the new item from its current position if it exists
-                            const filteredSelected = newSelected.filter(
-                                (item) => extractRowId(item) !== newItemRowId,
-                            );
-                            // Add it at the end so it becomes the last selected item
-                            filteredSelected.push(newItemListItem);
-                            internalState.setSelected(filteredSelected);
-                        }
-                    }
-                } else {
-                    // No previous selection, just select the new item
-                    const newItemListItem = getStateItem(newItem);
-                    if (newItemListItem && extractRowId(newItemListItem)) {
-                        internalState.setSelected([newItemListItem]);
-                    }
-                }
-            } else {
-                // Without Shift: select only the new item
-                const newItemListItem = getStateItem(newItem);
-                if (newItemListItem && extractRowId(newItemListItem)) {
-                    internalState.setSelected([newItemListItem]);
-                }
-            }
-
-            const offset = calculateScrollTopForIndex(newIndex);
-            scrollToTableOffset(offset);
-        },
-        [
-            data,
-            enableSelection,
-            internalState,
-            calculateScrollTopForIndex,
-            scrollToTableOffset,
-            extractRowId,
-            getStateItem,
-        ],
-    );
-
-    const isInitialScrollPositionSet = useRef<boolean>(false);
-
-    useEffect(() => {
-        if (!initialTop || isInitialScrollPositionSet.current) return;
-        isInitialScrollPositionSet.current = true;
-
-        if (initialTop.type === 'offset') {
-            scrollToTableOffset(initialTop.to);
-        } else {
-            scrollToTableIndex(initialTop.to);
-        }
-    }, [initialTop, scrollToTableIndex, scrollToTableOffset]);
-
-    // Scroll to top when startRowIndex changes
-    useEffect(() => {
-        if (startRowIndex !== undefined) {
-            scrollToTableOffset(0);
-        }
-    }, [startRowIndex, scrollToTableOffset]);
-
-    const imperativeHandle: ItemListHandle = useMemo(() => {
-        return {
-            internalState,
-            scrollToIndex: (index: number, options?: { align?: 'bottom' | 'center' | 'top' }) => {
-                scrollToTableIndex(enableHeader ? index + 1 : index, options);
-            },
-            scrollToOffset: (offset: number) => {
-                scrollToTableOffset(offset);
-            },
-        };
-    }, [enableHeader, internalState, scrollToTableIndex, scrollToTableOffset]);
-
-    useImperativeHandle(ref, () => imperativeHandle);
-
-    useEffect(() => {
-        handleRef.current = imperativeHandle;
-    }, [imperativeHandle]);
+    useTableImperativeHandle({
+        autoScrollToActiveRow,
+        enableHeader,
+        handleRef,
+        internalState,
+        ref,
+        scrollToTableIndex,
+        scrollToTableOffset,
+    });
 
     const controls = useDefaultItemListControls({
         onColumnReordered,
@@ -1902,7 +1706,7 @@ const BaseItemTableList = ({
     // Create itemProps for sticky header
     const stickyHeaderItemProps: TableItemProps = useMemo(
         () => ({
-            calculatedColumnWidths,
+            calculatedColumnWidths: displayColumnWidths,
             cellPadding,
             columns: parsedColumns,
             controls,
@@ -1922,17 +1726,18 @@ const BaseItemTableList = ({
             internalState,
             itemType,
             pinnedLeftColumnCount,
-            pinnedLeftColumnWidths: calculatedColumnWidths.slice(0, pinnedLeftColumnCount),
+            pinnedLeftColumnWidths: displayColumnWidths.slice(0, pinnedLeftColumnCount),
             pinnedRightColumnCount,
-            pinnedRightColumnWidths: calculatedColumnWidths.slice(
+            pinnedRightColumnWidths: displayColumnWidths.slice(
                 pinnedLeftColumnCount + totalColumnCount,
             ),
             playerContext,
+            playlistId: routePlaylistId,
             size,
             tableId,
         }),
         [
-            calculatedColumnWidths,
+            displayColumnWidths,
             cellPadding,
             controls,
             parsedColumns,
@@ -1953,313 +1758,103 @@ const BaseItemTableList = ({
             pinnedLeftColumnCount,
             pinnedRightColumnCount,
             playerContext,
+            routePlaylistId,
             size,
             tableId,
             totalColumnCount,
         ],
     );
 
-    const StickyHeader = useMemo(() => {
-        if (!shouldShowStickyHeader || !enableHeader) {
-            return null;
-        }
+    const onShowPlayingSong = useCallback(() => {
+        const targetId = usePlayerStore.getState().getCurrentSong()?.id;
+        if (!targetId) return;
+        const index =
+            getItemIndex?.(targetId) ??
+            data.findIndex((item) => (item as null | { id?: string })?.id === targetId);
+        if (index === undefined || index < 0) return;
+        handleRef.current?.scrollToIndex(index, { align: 'center', behavior: 'auto' });
+    }, [data, getItemIndex]);
 
-        const pinnedLeftWidth = calculatedColumnWidths
-            .slice(0, pinnedLeftColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-        const mainWidth = calculatedColumnWidths
-            .slice(pinnedLeftColumnCount, pinnedLeftColumnCount + totalColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-        const pinnedRightWidth = calculatedColumnWidths
-            .slice(pinnedLeftColumnCount + totalColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-
-        return (
-            <div
-                className={styles.stickyHeader}
-                ref={stickyHeaderRef}
-                style={{
-                    top: `${stickyTop}px`,
-                }}
-            >
-                <div className={styles.stickyHeaderRow}>
-                    {pinnedLeftColumnCount > 0 && (
-                        <div
-                            className={clsx(
-                                styles.stickyHeaderSection,
-                                styles.stickyHeaderPinnedLeft,
-                            )}
-                            ref={stickyHeaderLeftRef}
-                            style={{
-                                flex: '0 1 auto',
-                                minWidth: `${pinnedLeftWidth}px`,
-                                overflow: 'hidden',
-                            }}
-                        >
-                            {parsedColumns
-                                .filter((col) => col.pinned === 'left')
-                                .map((col) => {
-                                    const columnIndex = parsedColumns.findIndex((c) => c === col);
-                                    return (
-                                        <CellComponent
-                                            ariaAttributes={{
-                                                'aria-colindex': columnIndex + 1,
-                                                role: 'gridcell',
-                                            }}
-                                            columnIndex={columnIndex}
-                                            key={col.id}
-                                            rowIndex={0}
-                                            style={{
-                                                height: headerHeight,
-                                                width: calculatedColumnWidths[columnIndex],
-                                            }}
-                                            {...stickyHeaderItemProps}
-                                        />
-                                    );
-                                })}
-                        </div>
-                    )}
-                    <div
-                        className={clsx(
-                            styles.stickyHeaderSection,
-                            styles.stickyHeaderMain,
-                            styles.noScrollbar,
-                        )}
-                        ref={stickyHeaderMainRef}
-                        style={{
-                            flex: '1 1 auto',
-                            minWidth: 0,
-                            overflowX: 'auto',
-                            overflowY: 'hidden',
-                        }}
-                    >
-                        <div
-                            style={{
-                                display: 'flex',
-                                minWidth: `${mainWidth}px`,
-                            }}
-                        >
-                            {parsedColumns
-                                .filter((col) => col.pinned === null)
-                                .map((col) => {
-                                    const columnIndex = parsedColumns.findIndex((c) => c === col);
-                                    return (
-                                        <CellComponent
-                                            ariaAttributes={{
-                                                'aria-colindex': columnIndex + 1,
-                                                role: 'gridcell',
-                                            }}
-                                            columnIndex={columnIndex}
-                                            key={col.id}
-                                            rowIndex={0}
-                                            style={{
-                                                flexShrink: 0,
-                                                height: headerHeight,
-                                                width: calculatedColumnWidths[columnIndex],
-                                            }}
-                                            {...stickyHeaderItemProps}
-                                        />
-                                    );
-                                })}
-                        </div>
-                    </div>
-                    {pinnedRightColumnCount > 0 && (
-                        <div
-                            className={clsx(
-                                styles.stickyHeaderSection,
-                                styles.stickyHeaderPinnedRight,
-                            )}
-                            ref={stickyHeaderRightRef}
-                            style={{
-                                flex: '0 1 auto',
-                                minWidth: `${pinnedRightWidth}px`,
-                                overflow: 'hidden',
-                            }}
-                        >
-                            {parsedColumns
-                                .filter((col) => col.pinned === 'right')
-                                .map((col) => {
-                                    const columnIndex = parsedColumns.findIndex((c) => c === col);
-                                    return (
-                                        <CellComponent
-                                            ariaAttributes={{
-                                                'aria-colindex': columnIndex + 1,
-                                                role: 'gridcell',
-                                            }}
-                                            columnIndex={columnIndex}
-                                            key={col.id}
-                                            rowIndex={0}
-                                            style={{
-                                                height: headerHeight,
-                                                width: calculatedColumnWidths[columnIndex],
-                                            }}
-                                            {...stickyHeaderItemProps}
-                                        />
-                                    );
-                                })}
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }, [
-        shouldShowStickyHeader,
-        enableHeader,
-        stickyTop,
-        calculatedColumnWidths,
-        pinnedLeftColumnCount,
-        pinnedRightColumnCount,
-        totalColumnCount,
-        parsedColumns,
-        headerHeight,
-        CellComponent,
-        stickyHeaderItemProps,
-    ]);
-
-    // Calculate group row height (use same as regular table row height)
-    const groupRowHeight = useMemo(() => {
-        if (stickyGroupIndex === null || !groups) {
-            const height = size === 'compact' ? 40 : size === 'large' ? 88 : 64;
-            return typeof rowHeight === 'number' ? rowHeight : height;
-        }
-
-        // Calculate the row index for this group header
-        let cumulativeDataIndex = 0;
-        const headerOffset = enableHeader ? 1 : 0;
-        for (let i = 0; i < stickyGroupIndex; i++) {
-            cumulativeDataIndex += groups[i].itemCount;
-        }
-        const groupHeaderIndex = headerOffset + cumulativeDataIndex + stickyGroupIndex;
-
-        // Use the regular row height for group rows
-        return getRowHeightWrapper(groupHeaderIndex);
-    }, [stickyGroupIndex, groups, getRowHeightWrapper, enableHeader, rowHeight, size]);
-
-    const StickyGroupRow = useMemo(() => {
-        if (!shouldRenderStickyGroupRow || stickyGroupIndex === null || !groups) {
-            return null;
-        }
-
-        const group = groups[stickyGroupIndex];
-        const originalData = data.filter((item) => item !== null);
-        let cumulativeDataIndex = 0;
-        for (let i = 0; i < stickyGroupIndex; i++) {
-            cumulativeDataIndex += groups[i].itemCount;
-        }
-
-        const groupContent = group.render({
-            data: originalData,
-            groupIndex: stickyGroupIndex,
-            index: 0,
-            internalState,
-            startDataIndex: cumulativeDataIndex,
-        });
-
-        const pinnedLeftWidth = calculatedColumnWidths
-            .slice(0, pinnedLeftColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-        const mainWidth = calculatedColumnWidths
-            .slice(pinnedLeftColumnCount, pinnedLeftColumnCount + totalColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-        const pinnedRightWidth = calculatedColumnWidths
-            .slice(pinnedLeftColumnCount + totalColumnCount)
-            .reduce((sum, width) => sum + width, 0);
-
-        const totalTableWidth = calculatedColumnWidths.reduce((sum, width) => sum + width, 0);
-
-        // Calculate the actual sticky position accounting for sticky header
-        const actualStickyTop = stickyGroupTop;
-
-        return (
-            <div
-                className={styles.stickyGroupRow}
-                ref={stickyGroupRowRef}
-                style={{
-                    top: `${actualStickyTop}px`,
-                }}
-            >
-                <div className={styles.stickyGroupRowContent}>
-                    {pinnedLeftColumnCount > 0 && (
-                        <div
-                            className={styles.stickyGroupRowSection}
-                            style={{ width: `${pinnedLeftWidth}px` }}
-                        >
-                            <div
-                                style={{
-                                    height: groupRowHeight,
-                                    width: `${pinnedLeftWidth}px`,
-                                }}
-                            >
-                                {groupContent}
-                            </div>
-                        </div>
-                    )}
-                    <div
-                        className={styles.stickyGroupRowSection}
-                        style={{
-                            marginLeft: pinnedLeftColumnCount > 0 ? 0 : '-2rem',
-                            marginRight: '-2rem',
-                            paddingLeft: pinnedLeftColumnCount > 0 ? 0 : '2rem',
-                            paddingRight: '2rem',
-                            width: `${mainWidth}px`,
-                        }}
-                    >
-                        <div
-                            style={{
-                                height: groupRowHeight,
-                                marginLeft: pinnedLeftWidth > 0 ? `-${pinnedLeftWidth}px` : 0,
-                                width: `${totalTableWidth}px`,
-                            }}
-                        >
-                            {groupContent}
-                        </div>
-                    </div>
-                    {pinnedRightColumnCount > 0 && (
-                        <div
-                            className={styles.stickyGroupRowSection}
-                            style={{ width: `${pinnedRightWidth}px` }}
-                        >
-                            <div
-                                style={{
-                                    height: groupRowHeight,
-                                    width: `${pinnedRightWidth}px`,
-                                }}
-                            />
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }, [
-        shouldRenderStickyGroupRow,
-        stickyGroupIndex,
-        groups,
-        data,
+    useListHotkeys({
+        controls,
+        focusContainerRef: containerRef,
+        focused,
         internalState,
-        calculatedColumnWidths,
-        pinnedLeftColumnCount,
-        pinnedRightColumnCount,
-        totalColumnCount,
-        groupRowHeight,
-        stickyGroupTop,
-    ]);
+        itemType,
+        onShowPlayingSong,
+    });
 
-    useHotkeys([
+    const tableConfigValue = useMemo<ItemTableListConfig>(
+        () => ({
+            cellPadding,
+            columns: parsedColumns,
+            controls,
+            enableAlternateRowColors,
+            enableColumnReorder: !!onColumnReordered,
+            enableColumnResize: !!onColumnResized,
+            enableDrag,
+            enableExpansion,
+            enableHeader,
+            enableHorizontalBorders,
+            enableRowHoverHighlight,
+            enableSelection,
+            enableVerticalBorders,
+            getRowHeight,
+            groups,
+            internalState,
+            itemType,
+            playerContext,
+            playlistId: routePlaylistId,
+            size,
+            startRowIndex,
+            tableId,
+        }),
         [
-            'mod+a',
-            () => {
-                if (focused) {
-                    if (internalState.isAllSelected()) {
-                        internalState.deselectAll();
-                    } else {
-                        internalState.selectAll();
-                    }
-                }
-            },
+            cellPadding,
+            parsedColumns,
+            controls,
+            enableAlternateRowColors,
+            onColumnReordered,
+            onColumnResized,
+            enableDrag,
+            enableExpansion,
+            enableHeader,
+            enableHorizontalBorders,
+            enableRowHoverHighlight,
+            enableSelection,
+            enableVerticalBorders,
+            getRowHeight,
+            groups,
+            internalState,
+            itemType,
+            playerContext,
+            routePlaylistId,
+            size,
+            startRowIndex,
+            tableId,
         ],
-    ]);
+    );
 
-    return (
+    const columnCellComponents = useColumnCellComponents(
+        parsedColumns.map((c) => c.id as TableColumn),
+        itemType,
+    );
+
+    const optimizedCellComponent = useMemo<
+        JSXElementConstructor<CellComponentProps<TableItemProps>>
+    >(() => {
+        if (CellComponent && CellComponent !== ItemTableListColumn) {
+            return CellComponent;
+        }
+
+        return (cellProps: CellComponentProps<TableItemProps>) => {
+            return (
+                <MemoizedCellRouter {...cellProps} columnCellComponents={columnCellComponents} />
+            );
+        };
+    }, [CellComponent, columnCellComponents]);
+
+    const tableMotion = (
         <motion.div
             className={styles.itemTableListContainer}
             onKeyDown={handleKeyDown}
@@ -2273,32 +1868,42 @@ const BaseItemTableList = ({
             ref={mergedContainerRef}
             tabIndex={0}
             {...animationProps.fadeIn}
-            transition={{ duration: 1, ease: 'anticipate' }}
+            transition={{ duration: enableEntranceAnimation ? 0.3 : 0, ease: 'anticipate' }}
         >
-            {StickyHeader}
-            {StickyGroupRow}
-            <VirtualizedTableGrid
-                activeRowId={activeRowId}
-                calculatedColumnWidths={calculatedColumnWidths}
-                CellComponent={CellComponent}
-                cellPadding={cellPadding}
-                controls={controls}
+            <ItemTableListStickyUI
+                calculatedColumnWidths={displayColumnWidths}
+                CellComponent={optimizedCellComponent}
+                containerRef={containerRef}
                 data={data}
-                enableAlternateRowColors={enableAlternateRowColors}
-                enableColumnReorder={!!onColumnReordered}
-                enableColumnResize={!!onColumnResized}
-                enableDrag={enableDrag}
-                enableExpansion={enableExpansion}
-                enableHeader={enableHeader}
-                enableHorizontalBorders={enableHorizontalBorders}
-                enableRowHoverHighlight={enableRowHoverHighlight}
-                enableSelection={enableSelection}
-                enableVerticalBorders={enableVerticalBorders}
-                getRowHeight={getRowHeight}
+                enableHeader={!!enableHeader}
+                enableStickyGroupRows={!!enableStickyGroupRows}
+                enableStickyHeader={!!enableStickyHeader}
+                getRowHeightWrapper={getRowHeightWrapper}
                 groups={groups}
                 headerHeight={headerHeight}
                 internalState={internalState}
-                itemType={itemType}
+                parsedColumns={parsedColumns}
+                pinnedLeftColumnCount={pinnedLeftColumnCount}
+                pinnedLeftColumnRef={pinnedLeftColumnRef}
+                pinnedRightColumnCount={pinnedRightColumnCount}
+                pinnedRightColumnRef={pinnedRightColumnRef}
+                pinnedRowRef={pinnedRowRef}
+                rowHeight={rowHeight}
+                rowRef={rowRef}
+                size={size}
+                stickyHeaderItemProps={stickyHeaderItemProps}
+                totalColumnCount={totalColumnCount}
+            />
+            <MemoizedVirtualizedTableGrid
+                albumGroupContentHeights={albumGroupContentHeights}
+                calculatedColumnWidths={displayColumnWidths}
+                CellComponent={optimizedCellComponent}
+                data={data}
+                dataWithGroups={dataWithGroups}
+                enableScrollShadow={enableScrollShadow}
+                estimatedAlbumGroupContentHeight={estimatedAlbumGroupContentHeight}
+                getItem={getItem}
+                headerHeight={headerHeight}
                 mergedRowRef={mergedRowRef}
                 onRangeChanged={onRangeChanged}
                 parsedColumns={parsedColumns}
@@ -2308,44 +1913,30 @@ const BaseItemTableList = ({
                 pinnedRightColumnRef={pinnedRightColumnRef}
                 pinnedRowCount={pinnedRowCount}
                 pinnedRowRef={pinnedRowRef}
-                playerContext={playerContext}
-                showLeftShadow={showLeftShadow}
-                showRightShadow={showRightShadow}
-                showTopShadow={showTopShadow}
-                size={size}
-                startRowIndex={startRowIndex}
-                tableId={tableId}
+                scrollShadowStore={scrollShadowStore}
+                setAlbumGroupContentHeight={setAlbumGroupContentHeight}
+                tableConfig={tableConfigValue}
                 totalColumnCount={totalColumnCount}
                 totalRowCount={totalRowCount}
             />
-            <ExpandedContainer internalState={internalState} itemType={itemType} />
-            {/* {enableSelectionDialog && <SelectionDialog internalState={internalState} />} */}
         </motion.div>
+    );
+
+    return (
+        <ItemTableListStoreProvider activeRowId={activeRowId}>
+            <ItemTableListConfigProvider value={tableConfigValue}>
+                {onColumnResized ? (
+                    <ItemTableListColumnResizeLiveProvider value={columnResizeLiveValue}>
+                        {tableMotion}
+                    </ItemTableListColumnResizeLiveProvider>
+                ) : (
+                    tableMotion
+                )}
+            </ItemTableListConfigProvider>
+        </ItemTableListStoreProvider>
     );
 };
 
 export const ItemTableList = memo(BaseItemTableList);
-
-const ExpandedContainer = ({
-    internalState,
-    itemType,
-}: {
-    internalState: ItemListStateActions;
-    itemType: LibraryItem;
-}) => {
-    const hasExpanded = useItemListStateSubscription(internalState, (state) =>
-        state ? state.expanded.size > 0 : false,
-    );
-
-    return (
-        <AnimatePresence initial={false}>
-            {hasExpanded && (
-                <ExpandedListContainer>
-                    <ExpandedListItem internalState={internalState} itemType={itemType} />
-                </ExpandedListContainer>
-            )}
-        </AnimatePresence>
-    );
-};
 
 ItemTableList.displayName = 'ItemTableList';

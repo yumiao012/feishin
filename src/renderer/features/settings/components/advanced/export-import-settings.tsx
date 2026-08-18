@@ -1,6 +1,6 @@
 import { openModal } from '@mantine/modals';
 import { t } from 'i18next';
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 
 import { ExportImportSettingsModal } from '/@/renderer/components/export-import-settings-modal/export-import-settings-modal';
 import {
@@ -10,7 +10,7 @@ import {
 import { useSettingsForExport } from '/@/renderer/store';
 import { Button } from '/@/shared/components/button/button';
 
-export const ExportImportSettings = () => {
+export const ExportImportSettings = memo(() => {
     const settingForExport = useSettingsForExport();
 
     const onExportSettings = useCallback(() => {
@@ -31,9 +31,7 @@ export const ExportImportSettings = () => {
         openModal({
             children: <ExportImportSettingsModal />,
             size: 'lg',
-            title: t('setting.exportImportSettings_importModalTitle', {
-                postProcess: 'sentenceCase',
-            }),
+            title: t('setting.exportImportSettings_importModalTitle'),
         });
     };
 
@@ -42,30 +40,17 @@ export const ExportImportSettings = () => {
             control: (
                 <>
                     <Button onClick={onExportSettings} size="compact-sm">
-                        {t('setting.exportImportSettings_control_exportText', {
-                            postProcess: 'sentenceCase',
-                        })}
+                        {t('setting.exportImportSettings_control_exportText')}
                     </Button>
                     <Button onClick={openImportModal} size="compact-sm">
-                        {t('setting.exportImportSettings_control_importText', {
-                            postProcess: 'sentenceCase',
-                        })}
+                        {t('setting.exportImportSettings_control_importText')}
                     </Button>
                 </>
             ),
-            description: t('setting.exportImportSettings_control_description', {
-                postProcess: 'sentenceCase',
-            }),
-            title: t('setting.exportImportSettings_control_title', {
-                postProcess: 'sentenceCase',
-            }),
+            description: t('setting.exportImportSettings_control_description'),
+            title: t('setting.exportImportSettings_control_title'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={options}
-            title={t('page.setting.exportImport', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={options} title={t('page.setting.exportImport')} />;
+});

@@ -1,21 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
-import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import styles from './server-selector.module.css';
 
-import { useRadioStore } from '/@/renderer/features/radio/hooks/use-radio-player';
 import JellyfinLogo from '/@/renderer/features/servers/assets/jellyfin.png';
 import NavidromeLogo from '/@/renderer/features/servers/assets/navidrome.png';
 import OpenSubsonicLogo from '/@/renderer/features/servers/assets/opensubsonic.png';
 import { sharedQueries } from '/@/renderer/features/shared/api/shared-api';
+import { useScanStatus } from '/@/renderer/features/shared/hooks/use-scan-status';
 import { ServerSelectorItems } from '/@/renderer/features/sidebar/components/server-selector-items';
-import { useAppStore, useCurrentServer } from '/@/renderer/store';
+import { useCurrentServer } from '/@/renderer/store';
 import { hasFeature } from '/@/shared/api/utils';
 import { Box } from '/@/shared/components/box/box';
 import { DropdownMenu } from '/@/shared/components/dropdown-menu/dropdown-menu';
 import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
+import { ScrollArea } from '/@/shared/components/scroll-area/scroll-area';
 import { Stack } from '/@/shared/components/stack/stack';
 import { Text } from '/@/shared/components/text/text';
 import { ServerType } from '/@/shared/types/domain-types';
@@ -24,18 +24,13 @@ import { ServerFeature } from '/@/shared/types/features-types';
 export const ServerSelector = () => {
     const { t } = useTranslation();
     const currentServer = useCurrentServer();
-    const sidebarImageEnabled = useAppStore((state) => state.sidebar.image);
-    const isRadioPlaying = useRadioStore((state) => state.isPlaying);
-    const showImage = sidebarImageEnabled && !isRadioPlaying;
+    const { data: scanStatus, isScanning, isWatching } = useScanStatus();
 
     const { data: musicFolders } = useQuery(
         currentServer
             ? sharedQueries.musicFolders({ query: null, serverId: currentServer.id })
             : { enabled: false, queryKey: ['disabled'] },
     );
-
-    const targetRef = useRef<HTMLDivElement | null>(null);
-    const widthOfTarget = targetRef.current?.getBoundingClientRect().width;
 
     if (!currentServer) {
         return null;
@@ -49,18 +44,30 @@ export const ServerSelector = () => {
 
     const musicFolderDisplayText = (() => {
         if (selectedMusicFolders.length === 0) {
-            return t('page.appMenu.noMusicFolder', { postProcess: 'sentenceCase' });
+            return t('page.appMenu.noMusicFolder');
         }
 
         if (supportsMultiSelect && selectedMusicFolders.length > 1) {
             return t('page.appMenu.multipleMusicFolders', {
                 count: selectedMusicFolders.length,
-                postProcess: 'sentenceCase',
             });
         }
 
         return selectedMusicFolders[0].name;
     })();
+
+    const scanProgressParts: string[] = [];
+    if (scanStatus?.count && scanStatus.count > 0) {
+        scanProgressParts.push(t('common.scanItemCount', { count: scanStatus.count }));
+    }
+    if (scanStatus?.folderCount && scanStatus.folderCount > 0) {
+        scanProgressParts.push(t('common.scanFolderCount', { count: scanStatus.folderCount }));
+    }
+
+    const scanStatusText =
+        isWatching && isScanning
+            ? [t('common.scanningLibrary'), ...scanProgressParts].filter(Boolean).join(' · ')
+            : null;
 
     const logo =
         currentServer.type === ServerType.NAVIDROME
@@ -70,15 +77,11 @@ export const ServerSelector = () => {
               : OpenSubsonicLogo;
 
     return (
-        <DropdownMenu offset={0} position="top">
+        <DropdownMenu offset={0} position="right-start" withinPortal={false}>
             <DropdownMenu.Target>
                 <div className={styles.popoverTarget}>
-                    <Box
-                        className={`${styles.buttonContainer} ${
-                            showImage ? styles.buttonContainerNoBottomPadding : ''
-                        }`}
-                    >
-                        <Group className={styles.buttonGroup} gap="sm" ref={targetRef}>
+                    <Box className={styles.buttonContainer}>
+                        <Group className={styles.buttonGroup} gap="sm">
                             <img className={styles.logo} src={logo} />
                             <Stack className={styles.buttonStack} gap={2}>
                                 <Text fw={600} size="sm" truncate>
@@ -87,14 +90,21 @@ export const ServerSelector = () => {
                                 <Text isMuted size="xs" truncate>
                                     {musicFolderDisplayText}
                                 </Text>
+                                {scanStatusText && (
+                                    <Text isMuted size="xs" truncate>
+                                        {scanStatusText}
+                                    </Text>
+                                )}
                             </Stack>
                             <Icon icon="ellipsisVertical" size="sm" />
                         </Group>
                     </Box>
                 </div>
             </DropdownMenu.Target>
-            <DropdownMenu.Dropdown style={{ width: `${widthOfTarget}px` }}>
-                <ServerSelectorItems />
+            <DropdownMenu.Dropdown miw="16rem">
+                <ScrollArea className={styles.scrollArea}>
+                    <ServerSelectorItems />
+                </ScrollArea>
             </DropdownMenu.Dropdown>
         </DropdownMenu>
     );

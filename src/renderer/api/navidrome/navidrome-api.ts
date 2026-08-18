@@ -8,6 +8,8 @@ import qs from 'qs';
 import i18n from '/@/i18n/i18n';
 import { authenticationFailure } from '/@/renderer/api/utils';
 import { useAuthStore } from '/@/renderer/store';
+import { logger } from '/@/renderer/utils/logger';
+import { getServerUrl } from '/@/renderer/utils/normalize-server-url';
 import { ndType } from '/@/shared/api/navidrome/navidrome-types';
 import { resultWithHeaders } from '/@/shared/api/utils';
 import { toast } from '/@/shared/components/toast/toast';
@@ -45,12 +47,48 @@ export const contract = c.router({
             500: resultWithHeaders(ndType._response.error),
         },
     },
+    deleteArtistImage: {
+        body: null,
+        method: 'DELETE',
+        path: 'artist/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.deleteArtistImage),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    deleteInternetRadioStation: {
+        body: null,
+        method: 'DELETE',
+        path: 'radio/:id',
+        responses: {
+            200: resultWithHeaders(ndType._response.deleteInternetRadioStation),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    deleteInternetRadioStationImage: {
+        body: null,
+        method: 'DELETE',
+        path: 'radio/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.deleteInternetRadioStationImage),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
     deletePlaylist: {
         body: null,
         method: 'DELETE',
         path: 'playlist/:id',
         responses: {
             200: resultWithHeaders(ndType._response.deletePlaylist),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    deletePlaylistImage: {
+        body: null,
+        method: 'DELETE',
+        path: 'playlist/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.deletePlaylistImage),
             500: resultWithHeaders(ndType._response.error),
         },
     },
@@ -131,6 +169,15 @@ export const contract = c.router({
             500: resultWithHeaders(ndType._response.error),
         },
     },
+    getRadioList: {
+        method: 'GET',
+        path: 'radio',
+        query: ndType._parameters.radioList,
+        responses: {
+            200: resultWithHeaders(ndType._response.radioList),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
     getSongDetail: {
         method: 'GET',
         path: 'song/:id',
@@ -204,12 +251,48 @@ export const contract = c.router({
             500: resultWithHeaders(ndType._response.error),
         },
     },
+    updateInternetRadioStation: {
+        body: ndType._parameters.updateInternetRadioStation,
+        method: 'PUT',
+        path: 'radio/:id',
+        responses: {
+            200: resultWithHeaders(ndType._response.updateInternetRadioStation),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
     updatePlaylist: {
         body: ndType._parameters.updatePlaylist,
         method: 'PUT',
         path: 'playlist/:id',
         responses: {
             200: resultWithHeaders(ndType._response.updatePlaylist),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    uploadArtistImage: {
+        body: ndType._parameters.uploadArtistImage,
+        method: 'POST',
+        path: 'artist/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.uploadArtistImage),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    uploadInternetRadioStationImage: {
+        body: ndType._parameters.uploadInternetRadioStationImage,
+        method: 'POST',
+        path: 'radio/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.uploadInternetRadioStationImage),
+            500: resultWithHeaders(ndType._response.error),
+        },
+    },
+    uploadPlaylistImage: {
+        body: ndType._parameters.uploadPlaylistImage,
+        method: 'POST',
+        path: 'playlist/:id/image',
+        responses: {
+            200: resultWithHeaders(ndType._response.uploadPlaylistImage),
             500: resultWithHeaders(ndType._response.error),
         },
     },
@@ -323,12 +406,8 @@ axiosClient.interceptors.response.use(
 
                         if (res.status === 429) {
                             toast.error({
-                                message: i18n.t('error.loginRateError', {
-                                    postProcess: 'sentenceCase',
-                                }) as string,
-                                title: i18n.t('error.sessionExpiredError', {
-                                    postProcess: 'sentenceCase',
-                                }) as string,
+                                message: i18n.t('error.loginRateError') as string,
+                                title: i18n.t('error.sessionExpiredError') as string,
                             });
 
                             const serverId = currentServer.id;
@@ -343,11 +422,7 @@ axiosClient.interceptors.response.use(
                             throw TIMEOUT_ERROR;
                         }
                         if (res.status !== 200) {
-                            throw new Error(
-                                i18n.t('error.authenticatedFailed', {
-                                    postProcess: 'sentenceCase',
-                                }) as string,
-                            );
+                            throw new Error(i18n.t('error.authenticatedFailed') as string);
                         }
 
                         const newCredential = res.data.token;
@@ -369,7 +444,7 @@ axiosClient.interceptors.response.use(
                             console.error('Error when trying to reauthenticate: ', newError);
 
                             if (isAxiosError(newError) && newError.code === 'ERR_NETWORK') {
-                                console.log(
+                                logger.warn(
                                     'Network error during reauthentication - preserving credentials',
                                 );
                             } else {
@@ -386,7 +461,7 @@ axiosClient.interceptors.response.use(
             }
 
             if (isAxiosError(error) && error.code === 'ERR_NETWORK') {
-                console.log('Network error during authentication - preserving credentials');
+                logger.warn('Network error during authentication - preserving credentials');
             } else {
                 limitedFail(currentServer);
             }
@@ -397,11 +472,12 @@ axiosClient.interceptors.response.use(
 );
 
 export const ndApiClient = (args: {
+    forceRemoteUrl?: boolean;
     server: null | ServerListItemWithCredential;
     signal?: AbortSignal;
     url?: string;
 }) => {
-    const { server, signal, url } = args;
+    const { forceRemoteUrl, server, signal, url } = args;
 
     return initClient(contract, {
         api: async ({ body, headers, method, path }) => {
@@ -411,7 +487,8 @@ export const ndApiClient = (args: {
             const { params, path: api } = parsePath(path);
 
             if (server) {
-                baseUrl = `${server?.url}/api`;
+                const serverUrl = getServerUrl(server, forceRemoteUrl);
+                baseUrl = serverUrl ? `${serverUrl}/api` : undefined;
                 token = server?.ndCredential;
             } else {
                 baseUrl = url;
@@ -439,11 +516,7 @@ export const ndApiClient = (args: {
             } catch (e: any | AxiosError | Error) {
                 if (isAxiosError(e)) {
                     if (e.code === 'ERR_NETWORK') {
-                        throw new Error(
-                            i18n.t('error.networkError', {
-                                postProcess: 'sentenceCase',
-                            }) as string,
-                        );
+                        throw new Error(i18n.t('error.networkError') as string);
                     }
 
                     const error = e as AxiosError;

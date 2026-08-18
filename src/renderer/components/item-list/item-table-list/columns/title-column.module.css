@@ -1,12 +1,15 @@
 .name-container {
     display: -webkit-inline-box;
     align-self: flex-start;
-    width: fit-content;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
+}
+
+a.name-container {
+    width: auto;
 }
 
 .name-container.compact {
@@ -14,5 +17,9 @@
 }
 
 .name-container.large {
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 4;
+}
+
+.active {
+    color: var(--theme-colors-primary);
 }

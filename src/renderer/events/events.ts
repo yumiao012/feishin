@@ -1,17 +1,26 @@
 import { LibraryItem, Song } from '/@/shared/types/domain-types';
 
+export type AutoDJQueueAddedEventPayload = {
+    songCount: number;
+};
+
 export type EventMap = {
+    AUTODJ_QUEUE_ADDED: AutoDJQueueAddedEventPayload;
     ITEM_LIST_REFRESH: ItemListRefreshEventPayload;
     ITEM_LIST_UPDATE_ITEM: ItemListUpdateItemEventPayload;
     MEDIA_NEXT: MediaNextEventPayload;
     MEDIA_PREV: MediaPrevEventPayload;
+    MPV_RELOAD: MpvReloadEventPayload;
     PLAYER_PLAY: PlayerPlayEventPayload;
+    PLAYER_REPEATED: PlayerRepeatedEventPayload;
+    PLAYER_STOP: PlayerStopEventPayload;
     PLAYLIST_MOVE_DOWN: PlaylistMoveEventPayload;
     PLAYLIST_MOVE_TO_BOTTOM: PlaylistMoveEventPayload;
     PLAYLIST_MOVE_TO_TOP: PlaylistMoveEventPayload;
     PLAYLIST_MOVE_UP: PlaylistMoveEventPayload;
     PLAYLIST_REORDER: PlaylistReorderEventPayload;
     QUEUE_RESTORED: QueueRestoredEventPayload;
+    TAG_EDITED: TagEditedEventPayload;
     USER_FAVORITE: UserFavoriteEventPayload;
     USER_RATING: UserRatingEventPayload;
 };
@@ -36,9 +45,21 @@ export type MediaPrevEventPayload = {
     prevIndex: number;
 };
 
+export type MpvReloadEventPayload = Record<string, never>;
+
 export type PlayerPlayEventPayload = {
     id: string;
     index: number;
+};
+
+export type PlayerRepeatedEventPayload = {
+    index: number;
+};
+
+export type PlayerStopEventPayload = {
+    id?: string;
+    index?: number;
+    reset: boolean;
 };
 
 export type PlaylistMoveEventPayload = {
@@ -57,6 +78,12 @@ export type QueueRestoredEventPayload = {
     data: Song[];
     index: number;
     position: number;
+};
+
+export type TagEditedEventPayload = {
+    id: string[];
+    itemType: LibraryItem;
+    serverId: string;
 };
 
 export type UserFavoriteEventPayload = {

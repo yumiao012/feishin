@@ -1,19 +1,21 @@
 import {
+    useMutation,
     useQuery,
     useQueryClient,
     useSuspenseQuery,
     UseSuspenseQueryOptions,
 } from '@tanstack/react-query';
 import throttle from 'lodash/throttle';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { queryKeys } from '/@/renderer/api/query-keys';
 import { useListContext } from '/@/renderer/context/list-context';
 import { eventEmitter } from '/@/renderer/events/event-emitter';
 import { UserFavoriteEventPayload, UserRatingEventPayload } from '/@/renderer/events/events';
-import { LibraryItem } from '/@/shared/types/domain-types';
+import { getListRefreshMutationKey } from '/@/renderer/features/shared/components/list-refresh-button';
+import { LibraryItem, SortKeyRandom } from '/@/shared/types/domain-types';
 
-const getQueryKeyName = (itemType: LibraryItem): string => {
+export const getListQueryKeyName = (itemType: LibraryItem): string => {
     switch (itemType) {
         case LibraryItem.ALBUM:
             return 'albums';
@@ -32,6 +34,13 @@ const getQueryKeyName = (itemType: LibraryItem): string => {
     }
 };
 
+type InfiniteLoaderCacheData = {
+    dataMap: Map<number, unknown>;
+    idToIndexMap: Map<string, number>;
+    pagesLoaded: Record<string, boolean>;
+    version: number;
+};
+
 interface UseItemListInfiniteLoaderProps {
     eventKey: string;
     fetchThreshold?: number;
@@ -43,10 +52,12 @@ interface UseItemListInfiniteLoaderProps {
     serverId: string;
 }
 
-function getInitialData(itemCount: number) {
+function getInitialData(): InfiniteLoaderCacheData {
     return {
-        data: Array.from({ length: itemCount }, () => undefined),
+        dataMap: new Map(),
+        idToIndexMap: new Map(),
         pagesLoaded: {},
+        version: 0,
     };
 }
 
@@ -75,7 +86,6 @@ export const useItemListInfiniteLoader = ({
     const queryClient = useQueryClient();
     const lastFetchedPageRef = useRef<number>(-1);
     const currentVisibleRangeRef = useRef<null | { startIndex: number; stopIndex: number }>(null);
-    const [isRefetching, setIsRefetching] = useState(false);
     const refetchPromiseRef = useRef<null | Promise<void>>(null);
     const previousDataQueryKeyRef = useRef<string>('');
     const isRefetchingRef = useRef<boolean>(false);
@@ -85,7 +95,7 @@ export const useItemListInfiniteLoader = ({
     const { setItemCount } = useListContext();
 
     useEffect(() => {
-        if (!totalItemCount || !setItemCount) {
+        if (totalItemCount == null || !setItemCount) {
             return;
         }
 
@@ -97,8 +107,19 @@ export const useItemListInfiniteLoader = ({
         [serverId, itemType, query],
     );
 
+    const isRandomSort = query?.sortBy === SortKeyRandom;
+
     const fetchPage = useCallback(
         async (pageNumber: number) => {
+            if (isRandomSort) {
+                const existingData =
+                    queryClient.getQueryData<InfiniteLoaderCacheData>(dataQueryKey);
+                if (existingData?.pagesLoaded?.[pageNumber]) {
+                    lastFetchedPageRef.current = Math.max(lastFetchedPageRef.current, pageNumber);
+                    return;
+                }
+            }
+
             const startIndex = pageNumber * itemsPerPage;
             const queryParams = {
                 limit: itemsPerPage,
@@ -107,6 +128,7 @@ export const useItemListInfiniteLoader = ({
             };
 
             const result = await queryClient.fetchQuery({
+                gcTime: isRandomSort ? 1000 * 60 * 10 : 1000 * 15,
                 queryFn: async ({ signal }) => {
                     const result = await listQueryFn({
                         apiClientProps: { serverId, signal },
@@ -115,41 +137,60 @@ export const useItemListInfiniteLoader = ({
 
                     return result;
                 },
-                queryKey: queryKeys[getQueryKeyName(itemType)].list(serverId, queryParams),
+                queryKey: queryKeys[getListQueryKeyName(itemType)].list(serverId, queryParams),
+                staleTime: isRandomSort ? 1000 * 60 * 10 : 1000 * 15,
             });
 
-            const endIndex = startIndex + itemsPerPage;
-
             // Update the query data with the fetched page
-            queryClient.setQueryData(
-                dataQueryKey,
-                (oldData: { data: unknown[]; pagesLoaded: Record<string, boolean> }) => {
-                    const newData = [
-                        ...oldData.data.slice(0, startIndex),
-                        ...result.items,
-                        ...oldData.data.slice(endIndex),
-                    ];
-                    const newPagesLoaded = {
-                        ...oldData.pagesLoaded,
-                        [pageNumber]: true,
-                    };
+            queryClient.setQueryData(dataQueryKey, (oldData: InfiniteLoaderCacheData) => {
+                const nextDataMap = new Map(oldData.dataMap);
+                const nextIdToIndexMap = new Map(oldData.idToIndexMap);
 
-                    return {
-                        data: newData,
-                        pagesLoaded: newPagesLoaded,
-                    };
-                },
-            );
+                result.items.forEach((item, offset) => {
+                    const index = startIndex + offset;
+                    nextDataMap.set(index, item);
+                    if (item && typeof item === 'object' && 'id' in (item as any)) {
+                        const id = String((item as any).id);
+                        nextIdToIndexMap.set(id, index);
+                    }
+                });
+
+                return {
+                    dataMap: nextDataMap,
+                    idToIndexMap: nextIdToIndexMap,
+                    pagesLoaded: { ...oldData.pagesLoaded, [pageNumber]: true },
+                    version: oldData.version + 1,
+                };
+            });
 
             // Track the last fetched page
             lastFetchedPageRef.current = Math.max(lastFetchedPageRef.current, pageNumber);
         },
-        [itemsPerPage, query, queryClient, serverId, dataQueryKey, listQueryFn, itemType],
+        [
+            itemsPerPage,
+            query,
+            queryClient,
+            serverId,
+            dataQueryKey,
+            listQueryFn,
+            itemType,
+            isRandomSort,
+        ],
     );
 
     // Reset the loaded pages and refetch current page when the query changes
     useEffect(() => {
         const currentDataQueryKey = JSON.stringify(dataQueryKey);
+
+        if (isRandomSort) {
+            const existingData = queryClient.getQueryData<InfiniteLoaderCacheData | undefined>(
+                dataQueryKey,
+            );
+            if (existingData?.dataMap && existingData.dataMap.size > 0) {
+                previousDataQueryKeyRef.current = currentDataQueryKey;
+                return;
+            }
+        }
 
         if (previousDataQueryKeyRef.current === currentDataQueryKey || isRefetchingRef.current) {
             return;
@@ -171,7 +212,6 @@ export const useItemListInfiniteLoader = ({
         const countQueryKey = listCountQuery.queryKey;
 
         // Set refetching state and create a promise to suspend
-        setIsRefetching(true);
         const refetchPromise = (async () => {
             try {
                 // Reset the loaded pages
@@ -179,23 +219,24 @@ export const useItemListInfiniteLoader = ({
                     if (!oldData) return oldData;
                     return {
                         ...oldData,
+                        dataMap: new Map(),
+                        idToIndexMap: new Map(),
                         pagesLoaded: {},
+                        version: (oldData?.version ?? 0) + 1,
                     };
                 });
 
                 lastFetchedPageRef.current = -1;
                 currentVisibleRangeRef.current = null;
 
-                // Invalidate and wait for count query to refetch (this will suspend via useSuspenseQuery)
-                await queryClient.refetchQueries({
+                // Invalidate and wait for count query to refetch
+                await queryClient.ensureQueryData({
                     queryKey: countQueryKey,
-                    type: 'active',
                 });
 
                 // Fetch the first page after count is refetched
                 await fetchPage(pageToFetch);
             } finally {
-                setIsRefetching(false);
                 isRefetchingRef.current = false;
                 refetchPromiseRef.current = null;
             }
@@ -204,7 +245,6 @@ export const useItemListInfiniteLoader = ({
         refetchPromiseRef.current = refetchPromise;
 
         refetchPromise.catch(() => {
-            setIsRefetching(false);
             isRefetchingRef.current = false;
             refetchPromiseRef.current = null;
         });
@@ -212,17 +252,17 @@ export const useItemListInfiniteLoader = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dataQueryKey, queryClient, fetchPage, itemsPerPage]);
 
-    const { data } = useQuery<{ data: unknown[]; pagesLoaded: Record<string, boolean> }>({
+    const { data } = useQuery<InfiniteLoaderCacheData>({
         enabled: false,
-        initialData: getInitialData(totalItemCount),
+        initialData: getInitialData(),
         queryFn: () => {
-            return getInitialData(totalItemCount);
+            return getInitialData();
         },
         queryKey: dataQueryKey,
     });
 
     // Suspend if refetching
-    if (isRefetching && refetchPromiseRef.current) {
+    if (isRefetchingRef.current && refetchPromiseRef.current) {
         throw refetchPromiseRef.current;
     }
 
@@ -234,7 +274,7 @@ export const useItemListInfiniteLoader = ({
             const pageNumber = Math.floor(range.startIndex / itemsPerPage);
 
             const currentData = queryClient.getQueryData<{
-                data: unknown[];
+                dataMap: Map<number, unknown>;
                 pagesLoaded: Record<string, boolean>;
             }>(dataQueryKey);
 
@@ -283,32 +323,34 @@ export const useItemListInfiniteLoader = ({
         [onRangeChangedBase],
     );
 
-    const refresh = useCallback(
-        async (force?: boolean) => {
+    const refreshMutation = useMutation({
+        mutationFn: async (force?: boolean) => {
             // Invalidate all queries to ensure fresh data
-            await queryClient.invalidateQueries();
+            queryClient.invalidateQueries();
 
             // Reset the infinite list data
             const currentData = queryClient.getQueryData<{
-                data: unknown[];
+                dataMap: Map<number, unknown>;
                 pagesLoaded: Record<string, boolean>;
             }>(dataQueryKey);
 
             if (force || currentData) {
                 // Reset data to initial state and clear all loaded pages
                 await queryClient.setQueryData(dataQueryKey, (oldData: any) => {
-                    if (!oldData) return getInitialData(totalItemCount);
+                    if (!oldData) return getInitialData();
                     return {
                         ...oldData,
-                        data: Array.from({ length: totalItemCount }, () => undefined),
+                        dataMap: new Map(),
+                        idToIndexMap: new Map(),
                         pagesLoaded: {},
+                        version: (oldData?.version ?? 0) + 1,
                     };
                 });
                 lastFetchedPageRef.current = -1;
             }
 
             // Add a delay to make the refresh visually clear
-            await new Promise((resolve) => setTimeout(resolve, 150));
+            // await new Promise((resolve) => setTimeout(resolve, 150));
 
             // Determine which page to refetch based on current visible range
             let pageToFetch = 0;
@@ -332,33 +374,36 @@ export const useItemListInfiniteLoader = ({
                 stopIndex,
             });
         },
-        [queryClient, itemsPerPage, onRangeChangedBase, dataQueryKey, totalItemCount, fetchPage],
+        mutationKey: getListRefreshMutationKey(eventKey),
+    });
+
+    const refreshMutationRef = useRef(refreshMutation);
+    refreshMutationRef.current = refreshMutation;
+
+    const refresh = useCallback(
+        async (force?: boolean) => refreshMutationRef.current.mutateAsync(force),
+        [],
     );
 
     const updateItems = useCallback(
         (indexes: number[], value: object) => {
-            queryClient.setQueryData(
-                dataQueryKey,
-                (prev: { data: unknown[]; pagesLoaded: Record<string, boolean> }) => {
-                    return {
-                        ...prev,
-                        data: prev.data.map((item: any, index) => {
-                            if (!item) {
-                                return item;
-                            }
+            queryClient.setQueryData(dataQueryKey, (prev: InfiniteLoaderCacheData) => {
+                const nextDataMap = new Map(prev.dataMap);
 
-                            if (!indexes.includes(index)) {
-                                return item;
-                            }
+                indexes.forEach((index) => {
+                    const existing = nextDataMap.get(index);
+                    if (!existing || typeof existing !== 'object') {
+                        return;
+                    }
+                    nextDataMap.set(index, { ...(existing as any), ...(value as any) });
+                });
 
-                            return {
-                                ...item,
-                                ...value,
-                            };
-                        }),
-                    };
-                },
-            );
+                return {
+                    ...prev,
+                    dataMap: nextDataMap,
+                    version: prev.version + 1,
+                };
+            });
         },
         [queryClient, dataQueryKey],
     );
@@ -369,7 +414,7 @@ export const useItemListInfiniteLoader = ({
                 return;
             }
 
-            return refresh(true);
+            refreshMutationRef.current.mutate(true);
         };
 
         eventEmitter.on('ITEM_LIST_REFRESH', handleRefresh);
@@ -377,7 +422,7 @@ export const useItemListInfiniteLoader = ({
         return () => {
             eventEmitter.off('ITEM_LIST_REFRESH', handleRefresh);
         };
-    }, [eventKey, refresh]);
+    }, [eventKey]);
 
     useEffect(() => {
         const handleFavorite = (payload: UserFavoriteEventPayload) => {
@@ -385,16 +430,9 @@ export const useItemListInfiniteLoader = ({
                 return;
             }
 
-            const idToIndexMap = data.data
-                .filter(Boolean)
-                .reduce((acc: Record<string, number>, item: any, index: number) => {
-                    acc[item.id] = index;
-                    return acc;
-                }, {});
-
             const dataIndexes = payload.id
-                .map((id: string) => idToIndexMap[id])
-                .filter((idx) => idx !== undefined);
+                .map((id: string) => (data as any).idToIndexMap?.get(id))
+                .filter((idx): idx is number => typeof idx === 'number');
 
             if (dataIndexes.length === 0) {
                 return;
@@ -408,16 +446,9 @@ export const useItemListInfiniteLoader = ({
                 return;
             }
 
-            const idToIndexMap = data.data
-                .filter(Boolean)
-                .reduce((acc: Record<string, number>, item: any, index: number) => {
-                    acc[item.id] = index;
-                    return acc;
-                }, {});
-
             const dataIndexes = payload.id
-                .map((id: string) => idToIndexMap[id])
-                .filter((idx) => idx !== undefined);
+                .map((id: string) => (data as any).idToIndexMap?.get(id))
+                .filter((idx): idx is number => typeof idx === 'number');
 
             if (dataIndexes.length === 0) {
                 return;
@@ -435,7 +466,50 @@ export const useItemListInfiniteLoader = ({
         };
     }, [data, eventKey, itemType, serverId, updateItems]);
 
-    return { data: data.data, onRangeChanged, refresh, updateItems };
+    const itemCount = totalItemCount ?? 0;
+
+    const getItem = useCallback(
+        (index: number) => {
+            return (data as any).dataMap?.get(index);
+        },
+        [data],
+    );
+
+    const getItemIndex = useCallback(
+        (id: string) => {
+            return (data as any).idToIndexMap?.get(id);
+        },
+        [data],
+    );
+
+    const loadedItems = useMemo(() => {
+        const map: Map<number, unknown> | undefined = (data as any).dataMap;
+        if (!map || map.size === 0) return [];
+        return Array.from(map.entries())
+            .sort(([a], [b]) => a - b)
+            .map(([, v]) => v);
+    }, [data]);
+
+    const getLoadedItems = useCallback(() => {
+        const cacheData = queryClient.getQueryData<InfiniteLoaderCacheData>(dataQueryKey);
+        const map = cacheData?.dataMap;
+        if (!map || map.size === 0) return [];
+        return Array.from(map.entries())
+            .sort(([a], [b]) => a - b)
+            .map(([, v]) => v);
+    }, [dataQueryKey, queryClient]);
+
+    return {
+        dataVersion: (data as any).version ?? 0,
+        getItem,
+        getItemIndex,
+        getLoadedItems,
+        itemCount,
+        loadedItems,
+        onRangeChanged,
+        refresh,
+        updateItems,
+    };
 };
 
 export const parseListCountQuery = (query: any) => {

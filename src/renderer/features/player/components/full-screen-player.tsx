@@ -17,11 +17,20 @@ import { useItemImageUrl } from '/@/renderer/components/item-image/item-image';
 import { SONG_TABLE_COLUMNS } from '/@/renderer/components/item-list/item-table-list/default-columns';
 import { FullScreenPlayerImage } from '/@/renderer/features/player/components/full-screen-player-image';
 import { FullScreenPlayerQueue } from '/@/renderer/features/player/components/full-screen-player-queue';
-import { ListConfigMenu } from '/@/renderer/features/shared/components/list-config-menu';
+import {
+    useIsRadioActive,
+    useRadioPlayer,
+} from '/@/renderer/features/radio/hooks/use-radio-player';
+import {
+    ListConfigMenu,
+    SONG_DISPLAY_TYPES,
+} from '/@/renderer/features/shared/components/list-config-menu';
 import { useFastAverageColor } from '/@/renderer/hooks';
+import { useHotkeys } from '/@/renderer/hooks/use-hotkeys';
 import {
     useFullScreenPlayerStore,
     useFullScreenPlayerStoreActions,
+    useLyricsDisplaySettings,
     useLyricsSettings,
     usePlayerData,
     usePlayerSong,
@@ -35,10 +44,9 @@ import { Group } from '/@/shared/components/group/group';
 import { NumberInput } from '/@/shared/components/number-input/number-input';
 import { Option } from '/@/shared/components/option/option';
 import { Popover } from '/@/shared/components/popover/popover';
-import { Select } from '/@/shared/components/select/select';
+import { SegmentedControl } from '/@/shared/components/segmented-control/segmented-control';
 import { Slider } from '/@/shared/components/slider/slider';
 import { Switch } from '/@/shared/components/switch/switch';
-import { useHotkeys } from '/@/shared/hooks/use-hotkeys';
 import { LibraryItem } from '/@/shared/types/domain-types';
 import { ItemListKey, ListDisplayType, Platform } from '/@/shared/types/types';
 
@@ -77,13 +85,13 @@ const BackgroundImage = memo(({ dynamicBackground, dynamicIsImage }: BackgroundI
     const { nextSong } = usePlayerData();
 
     const currentImageUrl = useItemImageUrl({
-        id: currentSong?.id,
+        id: currentSong?.imageId || undefined,
         itemType: LibraryItem.SONG,
         type: 'itemCard',
     });
 
     const nextImageUrl = useItemImageUrl({
-        id: nextSong?.id,
+        id: nextSong?.imageId || undefined,
         itemType: LibraryItem.SONG,
         type: 'itemCard',
     });
@@ -219,11 +227,7 @@ const BackgroundImageOverlay = memo(
 
 BackgroundImageOverlay.displayName = 'BackgroundImageOverlay';
 
-interface ControlsProps {
-    isPageHovered: boolean;
-}
-
-const Controls = ({ isPageHovered }: ControlsProps) => {
+const Controls = () => {
     const { t } = useTranslation();
     const {
         dynamicBackground,
@@ -235,25 +239,49 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
     } = useFullScreenPlayerStore();
     const { setStore } = useFullScreenPlayerStoreActions();
     const { setSettings } = useSettingsStoreActions();
-    const lyricConfig = useLyricsSettings();
+    const lyricsSettings = useLyricsSettings();
+    const displaySettings = useLyricsDisplaySettings('default');
+    const lyricConfig = { ...lyricsSettings, ...displaySettings };
 
     const handleToggleFullScreenPlayer = () => {
-        setStore({ expanded: !expanded });
+        setStore({ expanded: !expanded, visualizerExpanded: false });
     };
 
     const handleLyricsSettings = (property: string, value: any) => {
-        setSettings({
-            lyrics: {
-                ...useSettingsStore.getState().lyrics,
-                [property]: value,
-            },
-        });
+        const displayProperties = [
+            'fontSize',
+            'fontSizeUnsync',
+            'gap',
+            'gapUnsync',
+            'paddingLeft',
+            'paddingRight',
+        ];
+        if (displayProperties.includes(property)) {
+            const currentDisplay = useSettingsStore.getState().lyricsDisplay;
+            setSettings({
+                lyricsDisplay: {
+                    ...currentDisplay,
+                    default: {
+                        ...currentDisplay.default,
+                        [property]: value,
+                    },
+                },
+            });
+        } else {
+            setSettings({
+                lyrics: {
+                    ...useSettingsStore.getState().lyrics,
+                    [property]: value,
+                },
+            });
+        }
     };
 
     useHotkeys([['Escape', handleToggleFullScreenPlayer]]);
 
     return (
         <Group
+            className={styles.controlsContainer}
             gap="sm"
             p="1rem"
             pos="absolute"
@@ -267,24 +295,22 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                 icon="arrowDownS"
                 iconProps={{ size: 'lg' }}
                 onClick={handleToggleFullScreenPlayer}
-                tooltip={{ label: t('common.minimize', { postProcess: 'titleCase' }) }}
-                variant={isPageHovered ? 'default' : 'subtle'}
+                tooltip={{ label: t('common.minimize') }}
+                variant="subtle"
             />
             <Popover position="bottom-start">
                 <Popover.Target>
                     <ActionIcon
                         icon="settings2"
                         iconProps={{ size: 'lg' }}
-                        tooltip={{ label: t('common.configure', { postProcess: 'titleCase' }) }}
-                        variant={isPageHovered ? 'default' : 'subtle'}
+                        tooltip={{ label: t('common.configure') }}
+                        variant="subtle"
                     />
                 </Popover.Target>
                 <Popover.Dropdown>
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.dynamicBackground', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.dynamicBackground')}
                         </Option.Label>
                         <Option.Control>
                             <Switch
@@ -300,9 +326,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     {dynamicBackground && (
                         <Option>
                             <Option.Label>
-                                {t('page.fullscreenPlayer.config.dynamicIsImage', {
-                                    postProcess: 'sentenceCase',
-                                })}
+                                {t('page.fullscreenPlayer.config.dynamicIsImage')}
                             </Option.Label>
                             <Option.Control>
                                 <Switch
@@ -319,9 +343,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     {dynamicBackground && dynamicIsImage && (
                         <Option>
                             <Option.Label>
-                                {t('page.fullscreenPlayer.config.dynamicImageBlur', {
-                                    postProcess: 'sentenceCase',
-                                })}
+                                {t('page.fullscreenPlayer.config.dynamicImageBlur')}
                             </Option.Label>
                             <Option.Control>
                                 <Slider
@@ -338,11 +360,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     )}
                     {dynamicBackground && (
                         <Option>
-                            <Option.Label>
-                                {t('page.fullscreenPlayer.config.opacity', {
-                                    postProcess: 'sentenceCase',
-                                })}
-                            </Option.Label>
+                            <Option.Label>{t('page.fullscreenPlayer.config.opacity')}</Option.Label>
                             <Option.Control>
                                 <Slider
                                     defaultValue={opacity}
@@ -357,9 +375,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     )}
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.useImageAspectRatio', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.useImageAspectRatio')}
                         </Option.Label>
                         <Option.Control>
                             <Switch
@@ -375,9 +391,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     <Divider my="sm" />
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.followCurrentLyric', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.followCurrentLyric')}
                         </Option.Label>
                         <Option.Control>
                             <Switch
@@ -390,9 +404,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     </Option>
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.showLyricProvider', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.showLyricProvider')}
                         </Option.Label>
                         <Option.Control>
                             <Switch
@@ -405,9 +417,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     </Option>
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.showLyricMatch', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.showLyricMatch')}
                         </Option.Label>
                         <Option.Control>
                             <Switch
@@ -419,19 +429,13 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                         </Option.Control>
                     </Option>
                     <Option>
-                        <Option.Label>
-                            {t('page.fullscreenPlayer.config.lyricSize', {
-                                postProcess: 'sentenceCase',
-                            })}
-                        </Option.Label>
+                        <Option.Label>{t('page.fullscreenPlayer.config.lyricSize')}</Option.Label>
                         <Option.Control>
                             <Group w="100%" wrap="nowrap">
                                 <Slider
                                     defaultValue={lyricConfig.fontSize}
                                     label={(e) =>
-                                        `${t('page.fullscreenPlayer.config.synchronized', {
-                                            postProcess: 'titleCase',
-                                        })}: ${e}px`
+                                        `${t('page.fullscreenPlayer.config.synchronized')}: ${e}px`
                                     }
                                     max={72}
                                     min={8}
@@ -441,9 +445,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                                 <Slider
                                     defaultValue={lyricConfig.fontSize}
                                     label={(e) =>
-                                        `${t('page.fullscreenPlayer.config.unsynchronized', {
-                                            postProcess: 'sentenceCase',
-                                        })}: ${e}px`
+                                        `${t('page.fullscreenPlayer.config.unsynchronized')}: ${e}px`
                                     }
                                     max={72}
                                     min={8}
@@ -456,11 +458,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                         </Option.Control>
                     </Option>
                     <Option>
-                        <Option.Label>
-                            {t('page.fullscreenPlayer.config.lyricGap', {
-                                postProcess: 'sentenceCase',
-                            })}
-                        </Option.Label>
+                        <Option.Label>{t('page.fullscreenPlayer.config.lyricGap')}</Option.Label>
                         <Option.Control>
                             <Group w="100%" wrap="nowrap">
                                 <Slider
@@ -486,29 +484,53 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                     </Option>
                     <Option>
                         <Option.Label>
-                            {t('page.fullscreenPlayer.config.lyricAlignment', {
-                                postProcess: 'sentenceCase',
-                            })}
+                            {t('page.fullscreenPlayer.config.lyricPaddingLeft')}
                         </Option.Label>
                         <Option.Control>
-                            <Select
+                            <Slider
+                                defaultValue={lyricConfig.paddingLeft ?? 0}
+                                label={(value) => `${value}%`}
+                                max={20}
+                                min={0}
+                                onChangeEnd={(value) => handleLyricsSettings('paddingLeft', value)}
+                                step={1}
+                                w="100%"
+                            />
+                        </Option.Control>
+                    </Option>
+                    <Option>
+                        <Option.Label>
+                            {t('page.fullscreenPlayer.config.lyricPaddingRight')}
+                        </Option.Label>
+                        <Option.Control>
+                            <Slider
+                                defaultValue={lyricConfig.paddingRight ?? 0}
+                                label={(value) => `${value}%`}
+                                max={20}
+                                min={0}
+                                onChangeEnd={(value) => handleLyricsSettings('paddingRight', value)}
+                                step={1}
+                                w="100%"
+                            />
+                        </Option.Control>
+                    </Option>
+                    <Option>
+                        <Option.Label>
+                            {t('page.fullscreenPlayer.config.lyricAlignment')}
+                        </Option.Label>
+                        <Option.Control>
+                            <SegmentedControl
                                 data={[
                                     {
-                                        label: t('common.left', {
-                                            postProcess: 'titleCase',
-                                        }),
+                                        label: t('common.left'),
                                         value: 'left',
                                     },
                                     {
-                                        label: t('common.center', {
-                                            postProcess: 'titleCase',
-                                        }),
+                                        label: t('common.center'),
                                         value: 'center',
                                     },
                                     {
-                                        label: t('common.right', {
-                                            postProcess: 'titleCase',
-                                        }),
+                                        label: t('common.right'),
                                         value: 'right',
                                     },
                                 ]}
@@ -518,11 +540,7 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                         </Option.Control>
                     </Option>
                     <Option>
-                        <Option.Label>
-                            {t('page.fullscreenPlayer.config.lyricOffset', {
-                                postProcess: 'sentenceCase',
-                            })}
-                        </Option.Label>
+                        <Option.Label>{t('page.fullscreenPlayer.config.lyricOffset')}</Option.Label>
                         <Option.Control>
                             <NumberInput
                                 defaultValue={lyricConfig.delayMs}
@@ -534,14 +552,16 @@ const Controls = ({ isPageHovered }: ControlsProps) => {
                             />
                         </Option.Control>
                     </Option>
-                    <Divider my="sm" />
                 </Popover.Dropdown>
             </Popover>
             <ListConfigMenu
                 buttonProps={{
-                    variant: isPageHovered ? 'default' : 'subtle',
+                    variant: 'subtle',
                 }}
-                displayTypes={[{ hidden: true, value: ListDisplayType.GRID }]}
+                displayTypes={[
+                    { hidden: true, value: ListDisplayType.GRID },
+                    ...SONG_DISPLAY_TYPES,
+                ]}
                 listKey={ItemListKey.FULL_SCREEN}
                 optionsConfig={{
                     table: {
@@ -599,23 +619,14 @@ interface PlayerContainerProps {
     children: ReactNode;
     dynamicBackground: boolean | undefined;
     dynamicIsImage: boolean | undefined;
-    onMouseEnter: () => void;
-    onMouseLeave: () => void;
     windowBarStyle: Platform;
 }
 
 const PlayerContainer = memo(
-    ({
-        children,
-        dynamicBackground,
-        dynamicIsImage,
-        onMouseEnter,
-        onMouseLeave,
-        windowBarStyle,
-    }: PlayerContainerProps) => {
+    ({ children, dynamicBackground, dynamicIsImage, windowBarStyle }: PlayerContainerProps) => {
         const currentSong = usePlayerSong();
         const imageUrl = useItemImageUrl({
-            id: currentSong?.id,
+            id: currentSong?.imageId || undefined,
             imageUrl: currentSong?.imageUrl,
             itemType: LibraryItem.SONG,
             type: 'itemCard',
@@ -633,8 +644,6 @@ const PlayerContainer = memo(
                 custom={{ background, dynamicBackground, windowBarStyle }}
                 exit="closed"
                 initial="closed"
-                onMouseEnter={onMouseEnter}
-                onMouseLeave={onMouseLeave}
                 transition={{ duration: 2 }}
                 variants={containerVariants}
             >
@@ -654,8 +663,11 @@ export const FullScreenPlayer = () => {
     const { dynamicBackground, dynamicImageBlur, dynamicIsImage } = useFullScreenPlayerStore();
     const { setStore } = useFullScreenPlayerStoreActions();
     const { windowBarStyle } = useWindowSettings();
+    const isRadioActive = useIsRadioActive();
+    const { isPlaying: isRadioPlaying } = useRadioPlayer();
 
-    const [isPageHovered, setIsPageHovered] = useState(false);
+    const isPlayingRadio = isRadioActive && isRadioPlaying;
+    const effectiveDynamicBackground = dynamicBackground && !isPlayingRadio;
 
     const location = useLocation();
     const isOpenedRef = useRef<boolean | null>(null);
@@ -670,15 +682,13 @@ export const FullScreenPlayer = () => {
 
     return (
         <PlayerContainer
-            dynamicBackground={dynamicBackground}
+            dynamicBackground={effectiveDynamicBackground}
             dynamicIsImage={dynamicIsImage}
-            onMouseEnter={() => setIsPageHovered(true)}
-            onMouseLeave={() => setIsPageHovered(false)}
             windowBarStyle={windowBarStyle}
         >
-            <Controls isPageHovered={isPageHovered} />
+            <Controls />
             <BackgroundImageOverlay
-                dynamicBackground={dynamicBackground}
+                dynamicBackground={effectiveDynamicBackground}
                 dynamicImageBlur={dynamicImageBlur}
             />
             <div className={styles.responsiveContainer}>

@@ -1,15 +1,27 @@
-import { openModal } from '@mantine/modals';
 import isElectron from 'is-electron';
 import { Fragment, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 
-import packageJson from '../../../../../package.json';
+import styles from './app-menu.module.css';
 
-import { ServerList } from '/@/renderer/features/servers/components/server-list';
+import { UpdateAvailableButton } from '/@/renderer/features/settings/components/update-available-button';
 import { openSettingsModal } from '/@/renderer/features/settings/utils/open-settings-modal';
-import { useAppStore, useAppStoreActions, useCommandPalette } from '/@/renderer/store';
+import { ServerSelector } from '/@/renderer/features/sidebar/components/server-selector';
+import { openReleaseNotesModal } from '/@/renderer/release-notes-modal';
+import {
+    useAppStore,
+    useAppStoreActions,
+    useCommandPalette,
+    useCurrentServer,
+    useGeneralSettings,
+    useLatestVersion,
+    useSettingsStoreActions,
+} from '/@/renderer/store';
+import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
 import { DropdownMenu, MenuItemProps } from '/@/shared/components/dropdown-menu/dropdown-menu';
+import { Flex } from '/@/shared/components/flex/flex';
+import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
 import { toast } from '/@/shared/components/toast/toast';
 
@@ -72,6 +84,9 @@ export const AppMenu = () => {
     const collapsed = useAppStore((state) => state.sidebar.collapsed);
     const privateMode = useAppStore((state) => state.privateMode);
     const { setPrivateMode, setSideBar } = useAppStoreActions();
+    const { setSettings } = useSettingsStoreActions();
+    const settings = useGeneralSettings();
+    const currentServer = useCurrentServer();
     const { open: openCommandPalette } = useCommandPalette();
 
     const handleBrowserDevTools = () => {
@@ -89,23 +104,16 @@ export const AppMenu = () => {
     const handlePrivateModeOff = () => {
         setPrivateMode(false);
         toast.info({
-            message: t('form.privateMode.disabled', { postProcess: 'sentenceCase' }),
-            title: t('form.privateMode.title', { postProcess: 'sentenceCase' }),
+            message: t('form.privateMode.disabled'),
+            title: t('form.privateMode.title'),
         });
     };
 
     const handlePrivateModeOn = () => {
         setPrivateMode(true);
         toast.info({
-            message: t('form.privateMode.enabled', { postProcess: 'sentenceCase' }),
-            title: t('form.privateMode.title', { postProcess: 'sentenceCase' }),
-        });
-    };
-
-    const handleManageServersModal = () => {
-        openModal({
-            children: <ServerList />,
-            title: t('page.manageServers.title', { postProcess: 'titleCase' }),
+            message: t('form.privateMode.enabled'),
+            title: t('form.privateMode.title'),
         });
     };
 
@@ -113,11 +121,41 @@ export const AppMenu = () => {
         browser?.quit();
     };
 
+    const handleSetSideQueueLayout = (sideQueueLayout: 'horizontal' | 'vertical') => {
+        setSettings({
+            general: {
+                ...settings,
+                sideQueueLayout,
+            },
+        });
+    };
+
+    const { currentVersion } = useLatestVersion();
+
+    const serverHeaderMenuItems: MenuItem[] = currentServer
+        ? [
+              {
+                  component: (
+                      <div className={styles.serverSelector}>
+                          <ServerSelector />
+                      </div>
+                  ),
+                  id: 'server-selector',
+                  type: 'custom',
+              },
+              {
+                  id: 'divider-server',
+                  type: 'divider',
+              },
+          ]
+        : [];
+
     const menuConfig: MenuItem[] = [
+        ...serverHeaderMenuItems,
         {
             icon: 'search',
             id: 'command-palette',
-            label: t('page.appMenu.commandPalette', { postProcess: 'sentenceCase' }),
+            label: t('page.appMenu.commandPalette'),
             onClick: openCommandPalette,
             type: 'item',
         },
@@ -132,14 +170,14 @@ export const AppMenu = () => {
                 {
                     icon: 'arrowLeftS',
                     id: 'go-back',
-                    label: t('page.appMenu.goBack', { postProcess: 'sentenceCase' }),
+                    label: t('page.appMenu.goBack'),
                     onClick: () => navigate(-1),
                     type: 'item',
                 },
                 {
                     icon: 'arrowRightS',
                     id: 'go-forward',
-                    label: t('page.appMenu.goForward', { postProcess: 'sentenceCase' }),
+                    label: t('page.appMenu.goForward'),
                     onClick: () => navigate(1),
                     type: 'item',
                 },
@@ -152,7 +190,7 @@ export const AppMenu = () => {
             item: {
                 icon: 'panelRightOpen',
                 id: 'expand-sidebar',
-                label: t('page.appMenu.expandSidebar', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.expandSidebar'),
                 onClick: handleExpandSidebar,
                 type: 'item',
             },
@@ -164,7 +202,7 @@ export const AppMenu = () => {
             item: {
                 icon: 'panelRightClose',
                 id: 'collapse-sidebar',
-                label: t('page.appMenu.collapseSidebar', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.collapseSidebar'),
                 onClick: handleCollapseSidebar,
                 type: 'item',
             },
@@ -175,24 +213,9 @@ export const AppMenu = () => {
             type: 'divider',
         },
         {
-            condition: !window.SERVER_LOCK,
-            id: 'manage-servers',
-            item: {
-                label: t('page.appMenu.manageServers', { postProcess: 'sentenceCase' }),
-                leftSection: <Icon icon="edit" />,
-                onClick: handleManageServersModal,
-                type: 'item',
-            },
-            type: 'conditional-item',
-        },
-        {
-            id: 'divider-3',
-            type: 'divider',
-        },
-        {
             icon: 'settings',
             id: 'settings',
-            label: t('page.appMenu.settings', { postProcess: 'sentenceCase' }),
+            label: t('page.appMenu.settings'),
             onClick: () => openSettingsModal(),
             type: 'item',
         },
@@ -202,7 +225,7 @@ export const AppMenu = () => {
             item: {
                 icon: 'lock',
                 iconColor: 'error',
-                label: t('page.appMenu.privateModeOff', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.privateModeOff'),
                 onClick: handlePrivateModeOff,
                 type: 'item',
             },
@@ -213,7 +236,7 @@ export const AppMenu = () => {
             id: 'private-mode-on',
             item: {
                 icon: 'lockOpen',
-                label: t('page.appMenu.privateModeOn', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.privateModeOn'),
                 onClick: handlePrivateModeOn,
                 type: 'item',
             },
@@ -224,16 +247,13 @@ export const AppMenu = () => {
             type: 'divider',
         },
         {
-            component: 'a',
-            href: 'https://github.com/jeffvli/feishin/releases',
             icon: 'brandGitHub',
             id: 'version',
-            label: t('page.appMenu.version', {
-                postProcess: 'sentenceCase',
-                version: packageJson.version,
-            }),
-            rightSection: <Icon icon="externalLink" />,
-            target: '_blank',
+            label: t('page.appMenu.version', { version: currentVersion }),
+            onClick: () =>
+                openReleaseNotesModal(
+                    t('common.newVersion', { version: currentVersion }) as string,
+                ),
             type: 'item',
         },
         {
@@ -242,7 +262,7 @@ export const AppMenu = () => {
             item: {
                 icon: 'appWindow',
                 id: 'open-devtools',
-                label: t('page.appMenu.openBrowserDevtools', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.openBrowserDevtools'),
                 onClick: handleBrowserDevTools,
                 type: 'item',
             },
@@ -254,11 +274,77 @@ export const AppMenu = () => {
             item: {
                 icon: 'x',
                 id: 'quit-app',
-                label: t('page.appMenu.quit', { postProcess: 'sentenceCase' }),
+                label: t('page.appMenu.quit'),
                 onClick: handleQuit,
                 type: 'item',
             },
             type: 'conditional-item',
+        },
+        {
+            component: (
+                <Flex align="center" justify="center" w="100%">
+                    <UpdateAvailableButton />
+                </Flex>
+            ),
+            id: 'update-available',
+            type: 'custom',
+        },
+        {
+            id: 'divider-5',
+            type: 'divider',
+        },
+        {
+            condition: settings.sideQueueType === 'sideQueue',
+            id: 'layout-toggle-group',
+            items: [
+                {
+                    component: (
+                        <Group gap="xs" grow pb="xs" pt="sm" px="xs" w="100%">
+                            <ActionIcon
+                                icon="layoutPanelRight"
+                                iconProps={{
+                                    size: 'xl',
+                                }}
+                                onClick={() => handleSetSideQueueLayout('horizontal')}
+                                tooltip={{
+                                    label: t('setting.sidePlayQueueLayout', {
+                                        context: 'optionHorizontal',
+                                    }),
+                                    openDelay: 0,
+                                    position: 'bottom',
+                                }}
+                                variant={
+                                    settings.sideQueueLayout === 'horizontal'
+                                        ? 'default'
+                                        : 'transparent'
+                                }
+                            />
+                            <ActionIcon
+                                icon="layoutPanelBottom"
+                                iconProps={{
+                                    size: 'xl',
+                                }}
+                                onClick={() => handleSetSideQueueLayout('vertical')}
+                                tooltip={{
+                                    label: t('setting.sidePlayQueueLayout', {
+                                        context: 'optionVertical',
+                                    }),
+                                    openDelay: 0,
+                                    position: 'bottom',
+                                }}
+                                variant={
+                                    settings.sideQueueLayout === 'vertical'
+                                        ? 'default'
+                                        : 'transparent'
+                                }
+                            />
+                        </Group>
+                    ),
+                    id: 'layout-toggle',
+                    type: 'custom',
+                },
+            ],
+            type: 'conditional-group',
         },
     ];
 

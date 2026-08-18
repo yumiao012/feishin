@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { queryKeys } from '/@/renderer/api/query-keys';
 import { usePlayer } from '/@/renderer/features/player/context/player-context';
 import { songsQueries } from '/@/renderer/features/songs/api/songs-api';
-import { useCurrentServerId, useGeneralSettings, usePlayButtonBehavior } from '/@/renderer/store';
+import { useArtistRadioCount, useCurrentServerId, usePlayButtonBehavior } from '/@/renderer/store';
 import { ContextMenu } from '/@/shared/components/context-menu/context-menu';
 import { AlbumArtist, Artist } from '/@/shared/types/domain-types';
 import { Play } from '/@/shared/types/types';
@@ -16,7 +16,7 @@ interface PlayArtistRadioActionProps {
 }
 
 export const PlayArtistRadioAction = ({ artist, disabled }: PlayArtistRadioActionProps) => {
-    const { artistRadioCount } = useGeneralSettings();
+    const artistRadioCount = useArtistRadioCount();
     const { t } = useTranslation();
     const player = usePlayer();
     const serverId = useCurrentServerId();
@@ -73,18 +73,18 @@ export const PlayArtistRadioAction = ({ artist, disabled }: PlayArtistRadioActio
                     onSelect={defaultPlayArtistRadioAction}
                     rightIcon="arrowRightS"
                 >
-                    {t('player.artistRadio', { postProcess: 'sentenceCase' })}
+                    {t('player.artistRadio')}
                 </ContextMenu.Item>
             </ContextMenu.SubmenuTarget>
             <ContextMenu.SubmenuContent>
                 <ContextMenu.Item leftIcon="mediaPlay" onSelect={handlePlayArtistRadioNow}>
-                    {t('player.play', { postProcess: 'sentenceCase' })}
+                    {t('player.play')}
                 </ContextMenu.Item>
                 <ContextMenu.Item leftIcon="mediaPlayNext" onSelect={handlePlayArtistRadioNext}>
-                    {t('player.addNext', { postProcess: 'sentenceCase' })}
+                    {t('player.addNext')}
                 </ContextMenu.Item>
                 <ContextMenu.Item leftIcon="mediaPlayLast" onSelect={handlePlayArtistRadioLast}>
-                    {t('player.addLast', { postProcess: 'sentenceCase' })}
+                    {t('player.addLast')}
                 </ContextMenu.Item>
             </ContextMenu.SubmenuContent>
         </ContextMenu.Submenu>

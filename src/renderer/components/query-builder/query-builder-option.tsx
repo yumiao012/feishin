@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Filters } from '/@/renderer/components/query-builder';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
@@ -102,19 +102,28 @@ const QueryValueInput = ({
     const isDatePickerOperator =
         operator === 'beforeDate' || operator === 'afterDate' || operator === 'inTheRangeDate';
 
+    const BooleanSelectComponent = useMemo(
+        () => (
+            <Select
+                data={[
+                    { label: 'true', value: 'true' },
+                    { label: 'false', value: 'false' },
+                ]}
+                onChange={onChange}
+                value={value}
+                {...props}
+            />
+        ),
+        [onChange, props, value],
+    );
+
+    if (operator === 'isMissing' || operator === 'isPresent') {
+        return BooleanSelectComponent;
+    }
+
     switch (type) {
         case 'boolean':
-            return (
-                <Select
-                    data={[
-                        { label: 'true', value: 'true' },
-                        { label: 'false', value: 'false' },
-                    ]}
-                    onChange={onChange}
-                    value={value}
-                    {...props}
-                />
-            );
+            return BooleanSelectComponent;
         case 'date':
             if (isDatePickerOperator && operator !== 'inTheRangeDate') {
                 const dateValue = value ? parseDateValue(value) : null;
@@ -139,7 +148,7 @@ const QueryValueInput = ({
         case 'dateRange':
             if (operator === 'inTheRangeDate') {
                 return (
-                    <Group gap="sm" wrap="nowrap">
+                    <Group gap="sm" grow wrap="nowrap">
                         <DateInput
                             clearable
                             defaultLevel="year"
@@ -213,7 +222,11 @@ const QueryValueInput = ({
                 <NumberInput
                     onChange={onChange}
                     size="sm"
-                    value={value !== undefined && value !== null ? Number(value) : undefined}
+                    value={
+                        value !== undefined && value !== null && value !== ''
+                            ? Number(value)
+                            : undefined
+                    }
                     {...props}
                 />
             );

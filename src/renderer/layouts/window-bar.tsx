@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import isElectron from 'is-electron';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RiCheckboxBlankLine, RiCloseLine, RiSubtractLine } from 'react-icons/ri';
 
 import appIcon from '../../../assets/icons/32x32.png';
@@ -13,7 +14,13 @@ import macMin from './assets/min-mac.png';
 import styles from './window-bar.module.css';
 
 import { useRadioPlayer } from '/@/renderer/features/radio/hooks/use-radio-player';
-import { useAppStore, usePlayerData, usePlayerStatus, useWindowSettings } from '/@/renderer/store';
+import {
+    useAppStore,
+    usePlayerData,
+    usePlayerStatus,
+    useWindowBarTrackinfo,
+    useWindowSettings,
+} from '/@/renderer/store';
 import { Text } from '/@/shared/components/text/text';
 import { Platform, PlayerStatus } from '/@/shared/types/types';
 
@@ -127,7 +134,10 @@ const MacOsControls = ({ controls, title }: WindowBarControlsProps) => {
 };
 
 export const WindowBar = () => {
+    const { t } = useTranslation();
     const { windowBarStyle } = useWindowSettings();
+    const windowBarTrackinfo = useWindowBarTrackinfo();
+
     const playerStatus = usePlayerStatus();
     const privateMode = useAppStore((state) => state.privateMode);
     const handleMinimize = () => minimize();
@@ -149,12 +159,16 @@ export const WindowBar = () => {
     const handleClose = useCallback(() => close(), []);
 
     const title = useMemo(() => {
-        const privateModeString = privateMode ? '(Private mode)' : '';
+        const privateModeString = privateMode ? t('page.windowBar.privateMode') : '';
+
+        if (!windowBarTrackinfo) {
+            return `Feishin${privateMode ? ` ${privateModeString}` : ''}`;
+        }
 
         // Show radio information if radio is active
         if (isRadioActive) {
-            const radioStatusString = !isRadioPlaying ? '(Paused) ' : '';
-            const radioTitle = stationName || 'Radio';
+            const radioStatusString = !isRadioPlaying ? t('page.windowBar.paused') : '';
+            const radioTitle = stationName;
 
             // Format metadata: show title, or combine artist and title if both available
             let radioMetadata = '';
@@ -172,7 +186,7 @@ export const WindowBar = () => {
         }
 
         // Show regular song information
-        const statusString = playerStatus === PlayerStatus.PAUSED ? '(Paused) ' : '';
+        const statusString = playerStatus === PlayerStatus.PAUSED ? t('page.windowBar.paused') : '';
         const queueString = queueLength ? `(${index + 1} / ${queueLength}) ` : '';
         const title = `${
             queueLength
@@ -191,6 +205,8 @@ export const WindowBar = () => {
         privateMode,
         queueLength,
         stationName,
+        t,
+        windowBarTrackinfo,
     ]);
 
     useEffect(() => {

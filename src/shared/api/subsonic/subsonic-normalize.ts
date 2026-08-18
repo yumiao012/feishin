@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { coerceYear, parsePartialIsoDate } from '/@/shared/api/partial-iso-date';
 import { ssType } from '/@/shared/api/subsonic/subsonic-types';
 import {
     Album,
@@ -16,46 +17,48 @@ import {
     Song,
 } from '/@/shared/types/domain-types';
 
-const getCoverArtUrl = (args: {
-    baseUrl: string | undefined;
-    coverArtId?: string;
-    credential: string | undefined;
-    size: number;
-}) => {
-    const size = args.size ? args.size : 250;
-
-    if (!args.coverArtId || args.coverArtId.match('2a96cbd8b46e442fc41c2b86b821562f')) {
-        return null;
-    }
-
-    return (
-        `${args.baseUrl}/rest/getCoverArt.view` +
-        `?id=${args.coverArtId}` +
-        `&${args.credential}` +
-        '&v=1.13.0' +
-        '&c=Feishin' +
-        `&size=${size}`
-    );
-};
-
 const getArtistList = (
     artists?: typeof ssType._response.song._type.artists,
     artistId?: number | string,
     artistName?: string,
+    participants?: null | Record<string, RelatedArtist[]>,
 ) => {
-    return artists
-        ? artists.map((item) => ({
-              id: item.id.toString(),
-              imageUrl: null,
-              name: item.name,
-          }))
-        : [
-              {
-                  id: artistId?.toString() || '',
-                  imageUrl: null,
-                  name: artistName || '',
-              },
-          ];
+    if (!artists && !participants) {
+        return [
+            {
+                id: artistId?.toString() || '',
+                imageId: null,
+                imageUrl: null,
+                name: artistName || '',
+                userFavorite: false,
+                userRating: null,
+            },
+        ];
+    }
+
+    const result: RelatedArtist[] = [];
+
+    artists?.forEach((item) => {
+        result.push({
+            id: item.id.toString(),
+            imageId: null,
+            imageUrl: null,
+            name: item.name,
+            userFavorite: false,
+            userRating: null,
+        });
+    });
+
+    if (participants?.['remixer']) {
+        const existingIds = new Set(result.map((artist) => artist.id));
+        for (const participant of participants['remixer']) {
+            if (!existingIds.has(participant.id)) {
+                result.push(participant);
+            }
+        }
+    }
+
+    return result;
 };
 
 const getParticipants = (
@@ -72,8 +75,11 @@ const getParticipants = (
         for (const contributor of item.contributors) {
             const artist = {
                 id: contributor.artist.id?.toString() || '',
+                imageId: null,
                 imageUrl: null,
                 name: contributor.artist.name || '',
+                userFavorite: false,
+                userRating: null,
             };
 
             const role = contributor.subRole
@@ -105,6 +111,7 @@ const getGenres = (
               _serverType: ServerType.SUBSONIC,
               albumCount: null,
               id: genre.name,
+              imageId: null,
               imageUrl: null,
               name: genre.name,
               songCount: null,
@@ -117,6 +124,7 @@ const getGenres = (
                     _serverType: ServerType.SUBSONIC,
                     albumCount: null,
                     id: item.genre,
+                    imageId: null,
                     imageUrl: null,
                     name: item.genre,
                     songCount: null,
@@ -125,38 +133,79 @@ const getGenres = (
           : [];
 };
 
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+const subsonicReleaseFields = (item: {
+    releaseDate?: { day?: number; month?: number; year?: number };
+    year?: number;
+}): { releaseDate: null | string; releaseYear: null | number } => {
+    const rd = item.releaseDate;
+    if (
+        rd &&
+        typeof rd.year === 'number' &&
+        typeof rd.month === 'number' &&
+        typeof rd.day === 'number'
+    ) {
+        const iso = `${rd.year}-${pad2(rd.month)}-${pad2(rd.day)}`;
+        const parsed = parsePartialIsoDate(iso);
+        return { releaseDate: parsed.date, releaseYear: parsed.year };
+    }
+
+    const y = coerceYear(item.year);
+    if (y > 0) {
+        return { releaseDate: String(y), releaseYear: y };
+    }
+
+    return { releaseDate: null, releaseYear: null };
+};
+const subsonicTrackYearField = (item: {
+    year?: number;
+}): { date: null | string; year: null | number } => {
+    const y = coerceYear(item.year);
+    if (y > 0) {
+        return { date: String(y), year: y };
+    }
+
+    return { date: null, year: null };
+};
+
 const normalizeSong = (
     item: z.infer<typeof ssType._response.song>,
     server?: null | ServerListItemWithCredential,
-    size?: number,
+    playlistIndex?: number,
+    discTitleMap?: Map<number, string>,
 ): Song => {
-    const imageUrl =
-        getCoverArtUrl({
-            baseUrl: server?.url,
-            coverArtId: item.coverArt?.toString(),
-            credential: server?.credential,
-            size: size || 300,
-        }) || null;
+    const participants = getParticipants(item);
+    const albumArtistsList = getArtistList(item.albumArtists, item.artistId, item.artist);
+    const albumArtistName =
+        item.albumArtists?.length > 0
+            ? item.albumArtists.map((a) => a.name).join(', ')
+            : item.artist || '';
+
+    const { releaseDate, releaseYear } = subsonicReleaseFields(item);
+    const { date, year } = subsonicTrackYearField(item);
 
     return {
         _itemType: LibraryItem.SONG,
         _serverId: server?.id || 'unknown',
         _serverType: ServerType.SUBSONIC,
         album: item.album || '',
-        albumArtists: getArtistList(item.albumArtists, item.artistId, item.artist),
+        albumArtistName,
+        albumArtists: albumArtistsList,
         albumId: item.albumId?.toString() || '',
         artistName: item.artist || '',
-        artists: getArtistList(item.artists, item.artistId, item.artist),
+        artists: getArtistList(item.artists, item.artistId, item.artist, participants),
         bitDepth: item.bitDepth || null,
         bitRate: item.bitRate || 0,
         bpm: item.bpm || null,
         channels: item.channelCount || null,
         comment: null,
         compilation: null,
-        container: item.contentType,
+        container: item.contentType.startsWith('audio/') ? item.contentType.split('/')[1] : null,
         createdAt: item.created,
+        date,
         discNumber: item.discNumber || 1,
-        discSubtitle: null,
+        discSubtitle: discTitleMap?.get(item.discNumber ?? 1) ?? null,
         duration: item.duration ? item.duration * 1000 : 0,
         explicitStatus:
             item.explicitStatus === 'explicit'
@@ -173,15 +222,15 @@ const normalizeSong = (
                 : null,
         genres: getGenres(item, server),
         id: item.id.toString(),
-        imagePlaceholderUrl: null,
-        imageUrl,
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         lastPlayedAt: null,
         lyrics: null,
         mbzRecordingId: item.musicBrainzId || null,
         mbzTrackId: null,
         name: item.title,
-        participants: getParticipants(item),
-        path: item.path,
+        participants,
+        path: item.path || '',
         peak:
             item.replayGain && (item.replayGain.albumPeak || item.replayGain.trackPeak)
                 ? {
@@ -190,76 +239,98 @@ const normalizeSong = (
                   }
                 : null,
         playCount: item?.playCount || 0,
-        releaseDate: null,
-        releaseYear: item.year || null,
+        playlistItemId: playlistIndex !== undefined ? playlistIndex.toString() : undefined,
+        releaseDate,
+        releaseYear,
         sampleRate: item.samplingRate || null,
         size: item.size,
+        sortName: item.title,
         tags: null,
         trackNumber: item.track || 1,
+        trackSubtitle: null,
         updatedAt: '',
         userFavorite: Boolean(item.starred) || false,
         userRating: item.userRating || null,
+        year,
     };
 };
 
 const normalizeAlbumArtist = (
     item:
-        | z.infer<typeof ssType._response.albumArtist>
-        | z.infer<typeof ssType._response.artistListEntry>,
+        | (z.infer<typeof ssType._response.albumArtist> & {
+              similarArtists?: NonNullable<
+                  z.infer<typeof ssType._response.artistInfo2>['artistInfo2']
+              >['similarArtist'];
+          })
+        | (z.infer<typeof ssType._response.artistListEntry> & {
+              similarArtists?: NonNullable<
+                  z.infer<typeof ssType._response.artistInfo2>['artistInfo2']
+              >['similarArtist'];
+          }),
     server?: null | ServerListItemWithCredential,
-    imageSize?: number,
 ): AlbumArtist => {
-    const imageUrl =
-        getCoverArtUrl({
-            baseUrl: server?.url,
-            coverArtId: item.coverArt?.toString(),
-            credential: server?.credential,
-            size: imageSize || 100,
-        }) || null;
-
     return {
         _itemType: LibraryItem.ALBUM_ARTIST,
         _serverId: server?.id || 'unknown',
         _serverType: ServerType.SUBSONIC,
         albumCount: item.albumCount ? Number(item.albumCount) : 0,
-        backgroundImageUrl: null,
         biography: null,
         duration: null,
         genres: [],
         id: item.id.toString(),
-        imageUrl,
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         lastPlayedAt: null,
         mbz: null,
         name: item.name,
         playCount: null,
-        similarArtists: [],
+        similarArtists:
+            item.similarArtists?.map((artist) => ({
+                id: String(artist.id),
+                imageId: artist.coverArt ?? String(artist.id),
+                imageUrl: null,
+                name: artist.name,
+                userFavorite: Boolean(artist.starred) || false,
+                userRating: artist.userRating || null,
+            })) || [],
         songCount: null,
         userFavorite: Boolean(item.starred) || false,
         userRating: null,
     };
 };
 
+const PRIMARY_RELEASE_TYPES = ['album', 'ep', 'single', 'broadcast', 'other'];
+
+const getReleaseType = (
+    item: z.infer<typeof ssType._response.album> | z.infer<typeof ssType._response.albumListEntry>,
+) => {
+    if (!item.releaseTypes) {
+        return null;
+    }
+
+    // Return the first primary release type
+    return item.releaseTypes.find((type) => PRIMARY_RELEASE_TYPES.includes(type)) || null;
+};
+
 const normalizeAlbum = (
     item: z.infer<typeof ssType._response.album> | z.infer<typeof ssType._response.albumListEntry>,
     server?: null | ServerListItemWithCredential,
-    imageSize?: number,
 ): Album => {
-    const imageUrl =
-        getCoverArtUrl({
-            baseUrl: server?.url,
-            coverArtId: item.coverArt?.toString(),
-            credential: server?.credential,
-            size: imageSize || 300,
-        }) || null;
+    const discTitleMap = new Map<number, string>();
+
+    (item as z.infer<typeof ssType._response.album>).discTitles?.forEach((discTitle) => {
+        discTitleMap.set(discTitle.disc, discTitle.title);
+    });
+
+    const { releaseDate, releaseYear } = subsonicReleaseFields(item);
 
     return {
         _itemType: LibraryItem.ALBUM,
         _serverId: server?.id || 'unknown',
         _serverType: ServerType.SUBSONIC,
-        albumArtist: item.artist,
+        albumArtistName: item.artist,
         albumArtists: getArtistList(item.artists, item.artistId, item.artist),
         artists: [],
-        backdropImageUrl: null,
         comment: null,
         createdAt: item.created,
         duration: item.duration * 1000,
@@ -271,36 +342,31 @@ const normalizeAlbum = (
                   : null,
         genres: getGenres(item, server),
         id: item.id.toString(),
-        imagePlaceholderUrl: null,
-        imageUrl,
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         isCompilation: null,
         lastPlayedAt: null,
         mbzId: null,
+        mbzReleaseGroupId: null,
         name: item.name,
-        originalDate: null,
+        originalDate: releaseDate,
+        originalYear: releaseYear ?? 0,
         participants: getParticipants(item),
         playCount: null,
         recordLabels: item.recordLabels?.map((item) => item.name) || [],
-        releaseDate:
-            item.releaseDate &&
-            typeof item.releaseDate.year === 'number' &&
-            typeof item.releaseDate.month === 'number' &&
-            typeof item.releaseDate.day === 'number'
-                ? new Date(
-                      item.releaseDate.year,
-                      item.releaseDate.month - 1,
-                      item.releaseDate.day,
-                  ).toISOString()
-                : null,
+        releaseDate,
+        releaseType: getReleaseType(item),
         releaseTypes: item.releaseTypes || [],
-        releaseYear: item.year || null,
+        releaseYear,
         size: null,
         songCount: item.songCount,
         songs:
             (item as z.infer<typeof ssType._response.album>).song?.map((song) =>
-                normalizeSong(song, server),
+                normalizeSong(song, server, undefined, discTitleMap),
             ) || [],
+        sortName: item.title,
         tags: null,
+        trackYearRange: null,
         updatedAt: item.created,
         userFavorite: Boolean(item.starred) || false,
         userRating: item.userRating || null,
@@ -322,13 +388,8 @@ const normalizePlaylist = (
         duration: item.duration * 1000,
         genres: [],
         id: item.id.toString(),
-        imagePlaceholderUrl: null,
-        imageUrl: getCoverArtUrl({
-            baseUrl: server?.url,
-            coverArtId: item.coverArt?.toString(),
-            credential: server?.credential,
-            size: 300,
-        }),
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         name: item.name,
         owner: item.owner,
         ownerId: item.owner,
@@ -348,6 +409,7 @@ const normalizeGenre = (
         _serverType: ServerType.SUBSONIC,
         albumCount: item.albumCount,
         id: item.value,
+        imageId: null,
         imageUrl: null,
         name: item.value,
         songCount: item.songCount,
@@ -387,6 +449,8 @@ const normalizeFolder = (
             songs: results?.songs || [],
         },
         id: item.id.toString(),
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         name: item.title,
         parentId: item.parent,
     };
@@ -398,6 +462,8 @@ const normalizeInternetRadioStation = (
     return {
         homepageUrl: item.homepageUrl || null,
         id: item.id,
+        imageId: item.coverArt?.toString() || null,
+        imageUrl: null,
         name: item.name,
         streamUrl: item.streamUrl,
     };

@@ -25,6 +25,7 @@ export const PlaylistListPaginatedTable = ({
     autoFitColumns = false,
     columns,
     enableAlternateRowColors = false,
+    enableHeader = true,
     enableHorizontalBorders = false,
     enableRowHoverHighlight = true,
     enableSelection = true,
@@ -86,6 +87,8 @@ export const PlaylistListPaginatedTable = ({
                 columns={columns}
                 data={data || []}
                 enableAlternateRowColors={enableAlternateRowColors}
+                enableExpansion={false}
+                enableHeader={enableHeader}
                 enableHorizontalBorders={enableHorizontalBorders}
                 enableRowHoverHighlight={enableRowHoverHighlight}
                 enableSelection={enableSelection}

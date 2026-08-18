@@ -11,6 +11,80 @@ const userParameters = z.object({
     username: z.string(),
 });
 
+const transcodeDecisionParameters = z.object({
+    mediaId: z.string(),
+    mediaType: z.enum(['song', 'podcast']),
+});
+
+const getTranscodeStreamParameters = z.object({
+    mediaId: z.string(),
+    mediaType: z.enum(['song', 'podcast']),
+    offset: z.number().optional(),
+    transcodeParams: z.string(),
+});
+
+const codecProfileLimitation = z.object({
+    comparison: z.string(),
+    name: z.string(),
+    required: z.boolean().optional(),
+    values: z.array(z.string()),
+});
+
+const directPlayProfile = z.object({
+    audioCodecs: z.array(z.string()),
+    containers: z.array(z.string()),
+    maxAudioChannels: z.number().optional(),
+    protocols: z.array(z.string()),
+});
+
+const transcodingProfile = z.object({
+    audioCodec: z.string(),
+    container: z.string(),
+    maxAudioChannels: z.number().optional(),
+    protocol: z.string(),
+});
+
+const codecProfile = z.object({
+    limitations: z.array(codecProfileLimitation).optional(),
+    name: z.string(),
+    type: z.string(),
+});
+
+const transcodeDecisionRequestBody = z.object({
+    codecProfiles: z.array(codecProfile).optional(),
+    directPlayProfiles: z.array(directPlayProfile).optional(),
+    maxAudioBitrate: z.number().optional(),
+    maxTranscodingAudioBitrate: z.number().optional(),
+    name: z.string(),
+    platform: z.string(),
+    transcodingProfiles: z.array(transcodingProfile).optional(),
+});
+
+const streamDetails = z.object({
+    audioBitdepth: z.number().optional(),
+    audioBitrate: z.number().optional(),
+    audioChannels: z.number().optional(),
+    audioProfile: z.string().optional(),
+    audioSamplerate: z.number().optional(),
+    codec: z.string().optional(),
+    container: z.string().optional(),
+    protocol: z.string().optional(),
+});
+
+const transcodeDecision = z.object({
+    canDirectPlay: z.boolean(),
+    canTranscode: z.boolean(),
+    errorReason: z.string().optional(),
+    sourceStream: streamDetails.optional(),
+    transcodeParams: z.string().optional(),
+    transcodeReason: z.array(z.string()).optional(),
+    transcodeStream: streamDetails.optional(),
+});
+
+const getTranscodeDecision = z.object({
+    transcodeDecision,
+});
+
 const user = z.object({
     user: z.object({
         adminRole: z.boolean(),
@@ -153,6 +227,14 @@ const album = z.object({
     contributors: z.array(contributor).optional(),
     coverArt: z.string(),
     created: z.string(),
+    discTitles: z
+        .array(
+            z.object({
+                disc: z.number(),
+                title: z.string(),
+            }),
+        )
+        .optional(),
     duration: z.number(),
     explicitStatus: z.string().optional(),
     genre: z.string().optional(),
@@ -222,24 +304,33 @@ const artistInfoParameters = z.object({
     includeNotPresent: z.boolean().optional(),
 });
 
-const artistInfo = z.object({
-    artistInfo: z.object({
-        biography: z.string().optional(),
-        largeImageUrl: z.string().optional(),
-        lastFmUrl: z.string().optional(),
-        mediumImageUrl: z.string().optional(),
-        musicBrainzId: z.string().optional(),
-        similarArtist: z.array(
-            z.object({
-                albumCount: z.string(),
-                artistImageUrl: z.string().optional(),
-                coverArt: z.string().optional(),
-                id: z.string(),
-                name: z.string(),
-            }),
-        ),
-        smallImageUrl: z.string().optional(),
-    }),
+// Organizes music according to ID3 tags, and must be queried with an ID3 artist id
+// (as returned by getArtists/getArtist). The non-ID3 getArtistInfo resolves the id
+// against the folder browsing namespace, where the same id belongs to an unrelated item.
+const artistInfo2 = z.object({
+    artistInfo2: z
+        .object({
+            biography: z.string().optional(),
+            largeImageUrl: z.string().optional(),
+            lastFmUrl: z.string().optional(),
+            mediumImageUrl: z.string().optional(),
+            musicBrainzId: z.string().optional(),
+            similarArtist: z
+                .array(
+                    z.object({
+                        albumCount: z.number().or(z.string()).optional(),
+                        artistImageUrl: z.string().optional(),
+                        coverArt: z.string().optional(),
+                        id,
+                        name: z.string(),
+                        starred: z.string().optional(),
+                        userRating: z.number().optional(),
+                    }),
+                )
+                .optional(),
+            smallImageUrl: z.string().optional(),
+        })
+        .optional(),
 });
 
 const topSongsListParameters = z.object({
@@ -262,6 +353,19 @@ const scrobbleParameters = z.object({
 });
 
 const scrobble = z.null();
+
+const scanStatusBody = z.object({
+    count: z.number(),
+    folderCount: z.number(),
+    lastScan: z.string().optional(),
+    scanning: z.boolean(),
+});
+
+const startScanParameters = z.object({});
+const startScan = z.object({ scanStatus: scanStatusBody });
+
+const getScanStatusParameters = z.object({});
+const getScanStatus = z.object({ scanStatus: scanStatusBody });
 
 const search3 = z.object({
     searchResult3: z
@@ -316,6 +420,7 @@ const serverInfo = z.object({
 });
 
 const structuredLyricsParameters = z.object({
+    enhanced: z.boolean().optional(),
     id: z.string(),
 });
 
@@ -324,9 +429,39 @@ const lyricLine = z.object({
     value: z.string(),
 });
 
+const lyricAgentRole = z.enum(['main', 'voice', 'bg', 'group']);
+
+const lyricAgent = z.object({
+    id: z.string(),
+    name: z.string().optional(),
+    role: lyricAgentRole,
+});
+
+const lyricCue = z.object({
+    byteEnd: z.number(),
+    byteStart: z.number(),
+    end: z.number(),
+    start: z.number(),
+    value: z.string(),
+});
+
+const lyricCueLine = z.object({
+    agentId: z.string().optional(),
+    cue: z.array(lyricCue).optional(),
+    end: z.number(),
+    index: z.number(),
+    start: z.number(),
+    value: z.string(),
+});
+
+const structuredLyricKind = z.enum(['main', 'translation', 'pronunciation']);
+
 const structuredLyric = z.object({
+    agents: z.array(lyricAgent).optional(),
+    cueLine: z.array(lyricCueLine).optional(),
     displayArtist: z.string().optional(),
     displayTitle: z.string().optional(),
+    kind: structuredLyricKind.optional(),
     lang: z.string(),
     line: z.array(lyricLine),
     offset: z.number().optional(),
@@ -370,8 +505,10 @@ const similarSongs2 = z.object({
 export enum SubsonicExtensions {
     FORM_POST = 'formPost',
     INDEX_BASED_QUEUE = 'indexBasedQueue',
+    PLAYBACK_REPORT = 'playbackReport',
     SONG_LYRICS = 'songLyrics',
     TRANSCODE_OFFSET = 'transcodeOffset',
+    TRANSCODING = 'transcoding',
 }
 
 const updatePlaylistParameters = z.object({
@@ -414,7 +551,6 @@ const getSongsByGenre = z.object({
 
 const getAlbumParameters = z.object({
     id: z.string(),
-    musicFolderId: z.string().optional(),
 });
 
 const getAlbum = z.object({
@@ -458,7 +594,7 @@ const deletePlaylistParameters = z.object({
 });
 
 const createPlaylistParameters = z.object({
-    name: z.string(),
+    name: z.string().optional(),
     playlistId: z.string().optional(),
     songId: z.array(z.string()).optional(),
 });
@@ -612,6 +748,7 @@ const getIndexes = z.object({
             .object({
                 artist: z
                     .object({
+                        coverArt: z.string().optional(),
                         id: z.string(),
                         name: z.string(),
                     })
@@ -657,17 +794,20 @@ const playQueue = z.object({
 });
 
 const playQueueByIndex = z.object({
-    playQueueByIndex: z.object({
-        changed: z.string(),
-        changedBy: z.string(),
-        currentIndex: z.number().optional(),
-        entry: song.array().optional(),
-        position: z.number().optional(),
-        username: z.string(),
-    }),
+    playQueueByIndex: z
+        .object({
+            changed: z.string(),
+            changedBy: z.string(),
+            currentIndex: z.number().optional(),
+            entry: song.array().optional(),
+            position: z.number().optional(),
+            username: z.string(),
+        })
+        .optional(),
 });
 
 const internetRadioStation = z.object({
+    coverArt: z.string().optional(),
     homepageUrl: z.string().optional(),
     id: z.string(),
     name: z.string(),
@@ -705,7 +845,68 @@ const getInternetRadioStations = z.object({
         .optional(),
 });
 
+const reportPlaybackParameters = z.object({
+    ignoreScrobble: z.boolean().optional(),
+    mediaId: z.string(),
+    mediaType: z.enum(['song', 'podcast']),
+    playbackRate: z.number().optional(),
+    positionMs: z.number(),
+    state: z.enum(['starting', 'playing', 'paused', 'stopped']),
+});
+
+const reportPlayback = z.null();
+
+const jukeboxControlParameters = z.object({
+    action: z.enum([
+        'start',
+        'stop',
+        'skip',
+        'set',
+        'get',
+        'setGain',
+        'add',
+        'clear',
+        'remove',
+        'shuffle',
+        'status',
+    ]),
+    gain: z.number().optional(),
+    id: z.union([z.string(), z.array(z.string())]).optional(),
+    index: z.number().optional(),
+    offset: z.number().optional(),
+});
+
+const jukeboxPlaylistEntry = z.object({
+    album: z.string().optional(),
+    artist: z.string().optional(),
+    coverArt: z.string().optional(),
+    duration: z.number().optional(),
+    id: z.string(),
+    isDir: z.boolean(),
+    parent: z.string().optional(),
+    title: z.string(),
+});
+
+const jukeboxStatus = z.object({
+    currentIndex: z.number().optional(),
+    gain: z.number(),
+    playing: z.boolean(),
+    position: z.number().optional(),
+});
+
+const jukeboxPlaylist = jukeboxStatus.extend({
+    entry: z.array(jukeboxPlaylistEntry).optional(),
+});
+
+const jukeboxControl = z.object({
+    jukeboxPlaylist: jukeboxPlaylist.optional(),
+    jukeboxStatus: jukeboxStatus.optional(),
+});
+
 export const ssType = {
+    _body: {
+        getTranscodeDecision: transcodeDecisionRequestBody,
+    },
     _parameters: {
         albumInfo: albumInfoParameters,
         albumList: albumListParameters,
@@ -726,11 +927,16 @@ export const ssType = {
         getMusicDirectory: getMusicDirectoryParameters,
         getPlaylist: getPlaylistParameters,
         getPlaylists: getPlaylistsParameters,
+        getScanStatus: getScanStatusParameters,
         getSong: getSongParameters,
         getSongsByGenre: getSongsByGenreParameters,
         getStarred: getStarredParameters,
+        getTranscodeDecision: transcodeDecisionParameters,
+        getTranscodeStream: getTranscodeStreamParameters,
+        jukeboxControl: jukeboxControlParameters,
         randomSongList: randomSongListParameters,
         removeFavorite: removeFavoriteParameters,
+        reportPlayback: reportPlaybackParameters,
         savePlayQueueByIndex: savePlayQueueByIndexParameters,
         saveQueue: saveQueueParameters,
         scrobble: scrobbleParameters,
@@ -738,6 +944,7 @@ export const ssType = {
         setRating: setRatingParameters,
         similarSongs: similarSongsParameters,
         similarSongs2: similarSongs2Parameters,
+        startScan: startScanParameters,
         structuredLyrics: structuredLyricsParameters,
         topSongsList: topSongsListParameters,
         updateInternetRadioStation: updateInternetRadioStationParameters,
@@ -751,7 +958,7 @@ export const ssType = {
         albumInfo,
         albumList,
         albumListEntry,
-        artistInfo,
+        artistInfo2,
         artistListEntry,
         authenticate,
         baseResponse,
@@ -771,10 +978,15 @@ export const ssType = {
         getMusicDirectory,
         getPlaylist,
         getPlaylists,
+        getScanStatus,
         getSong,
         getSongsByGenre,
         getStarred,
+        getTranscodeDecision,
         internetRadioStation,
+        jukeboxControl,
+        jukeboxPlaylist,
+        jukeboxStatus,
         musicFolderList,
         ping,
         playlist,
@@ -783,6 +995,7 @@ export const ssType = {
         playQueueByIndex,
         randomSongList,
         removeFavorite,
+        reportPlayback,
         saveQueue,
         scrobble,
         search3,
@@ -791,6 +1004,7 @@ export const ssType = {
         similarSongs,
         similarSongs2,
         song,
+        startScan,
         structuredLyrics,
         topSongsList,
         updateInternetRadioStation,

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid/non-secure';
-import { useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -21,6 +21,7 @@ import {
 } from '/@/shared/api/navidrome/navidrome-types';
 import { ActionIcon } from '/@/shared/components/action-icon/action-icon';
 import { Button } from '/@/shared/components/button/button';
+import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { DateInput } from '/@/shared/components/date-picker/date-picker';
 import { Group } from '/@/shared/components/group/group';
 import { NumberInput } from '/@/shared/components/number-input/number-input';
@@ -36,57 +37,62 @@ type FilterFieldConfig = {
 
 const getFilterFields = (t: (key: string, options?: any) => string): FilterFieldConfig[] => [
     {
-        label: t('table.config.label.title', { postProcess: 'titleCase' }),
+        label: t('table.config.label.title'),
         type: 'string',
         value: 'name',
     },
     {
-        label: t('table.config.label.albumArtist', { postProcess: 'titleCase' }),
+        label: t('table.config.label.albumArtist'),
         type: 'string',
         value: 'albumArtist',
     },
     {
-        label: t('table.config.label.artist', { postProcess: 'titleCase' }),
+        label: t('table.config.label.artist'),
         type: 'string',
         value: 'artist',
     },
     {
-        label: t('table.config.label.duration', { postProcess: 'titleCase' }),
+        label: t('table.config.label.duration'),
         type: 'number',
         value: 'duration',
     },
     {
-        label: t('table.config.label.genre', { postProcess: 'titleCase' }),
+        label: t('table.config.label.genre'),
         type: 'string',
         value: 'genre',
     },
     {
-        label: t('table.config.label.year', { postProcess: 'titleCase' }),
+        label: t('table.config.label.year'),
         type: 'number',
         value: 'year',
     },
     {
-        label: t('table.config.label.note', { postProcess: 'titleCase' }),
+        label: t('table.config.label.releaseYear'),
+        type: 'number',
+        value: 'releaseYear',
+    },
+    {
+        label: t('table.config.label.note'),
         type: 'string',
         value: 'note',
     },
     {
-        label: t('table.config.label.path', { postProcess: 'titleCase' }),
+        label: t('table.config.label.path'),
         type: 'string',
         value: 'path',
     },
     {
-        label: t('table.config.label.playCount', { postProcess: 'titleCase' }),
+        label: t('table.config.label.playCount'),
         type: 'number',
         value: 'playCount',
     },
     {
-        label: t('table.config.label.favorite', { postProcess: 'titleCase' }),
+        label: t('table.config.label.favorite'),
         type: 'boolean',
         value: 'favorite',
     },
     {
-        label: t('table.config.label.rating', { postProcess: 'titleCase' }),
+        label: t('table.config.label.rating'),
         type: 'number',
         value: 'rating',
     },
@@ -117,7 +123,7 @@ const getOperatorsForFieldType = (
             startsWith: 'filterOperator.startsWith',
         };
 
-        return t(operatorKeyMap[operator] || operator, { postProcess: 'titleCase' });
+        return t(operatorKeyMap[operator] || operator);
     };
 
     switch (type) {
@@ -165,12 +171,14 @@ const getOperatorsForFieldType = (
 };
 
 const FilterValueInput = ({
+    disabled,
     field,
     filterFields,
     onChange,
     operator,
     value,
 }: {
+    disabled?: boolean;
     field: PlayerFilterField;
     filterFields: FilterFieldConfig[];
     onChange: (value: (number | string)[] | boolean | number | string) => void;
@@ -203,6 +211,7 @@ const FilterValueInput = ({
                         { label: 'true', value: 'true' },
                         { label: 'false', value: 'false' },
                     ]}
+                    disabled={disabled}
                     onChange={(e) => onChange(e === 'true')}
                     value={value?.toString() || 'false'}
                     width="30%"
@@ -215,6 +224,7 @@ const FilterValueInput = ({
                     <DateInput
                         clearable
                         defaultLevel="year"
+                        disabled={disabled}
                         maxWidth={170}
                         onChange={(date) => onChange(date || '')}
                         size="sm"
@@ -226,6 +236,7 @@ const FilterValueInput = ({
             }
             return (
                 <TextInput
+                    disabled={disabled}
                     onChange={(e) => onChange(e.currentTarget.value)}
                     size="sm"
                     value={(value as string) || ''}
@@ -235,6 +246,7 @@ const FilterValueInput = ({
         case 'number':
             return (
                 <NumberInput
+                    disabled={disabled}
                     onChange={(e) => onChange(Number(e) || 0)}
                     size="sm"
                     value={value !== undefined && value !== null ? Number(value) : undefined}
@@ -245,6 +257,7 @@ const FilterValueInput = ({
         default:
             return (
                 <TextInput
+                    disabled={disabled}
                     onChange={(e) => onChange(e.currentTarget.value)}
                     size="sm"
                     value={(value as string) || ''}
@@ -254,7 +267,7 @@ const FilterValueInput = ({
     }
 };
 
-export const PlayerFilterSettings = () => {
+export const PlayerFilterSettings = memo(() => {
     const { t } = useTranslation();
     const filters = useSettingsStore((state) => state.playback.filters);
     const { setPlaybackFilters } = useSettingsStoreActions();
@@ -265,6 +278,7 @@ export const PlayerFilterSettings = () => {
         const newFilter: PlayerFilter = {
             field: 'name',
             id: nanoid(),
+            isEnabled: true,
             operator: 'is',
             value: '',
         };
@@ -322,6 +336,13 @@ export const PlayerFilterSettings = () => {
         [filters, setPlaybackFilters],
     );
 
+    const handleToggleEnabled = useCallback(
+        (id: string, isEnabled: boolean) => {
+            setPlaybackFilters(filters.map((f) => (f.id === id ? { ...f, isEnabled } : f)));
+        },
+        [filters, setPlaybackFilters],
+    );
+
     const fieldOptions = useMemo(
         () => filterFields.map((f) => ({ label: f.label, value: f.value })),
         [filterFields],
@@ -344,8 +365,18 @@ export const PlayerFilterSettings = () => {
 
                                 return (
                                     <Group gap="sm" key={filter.id}>
+                                        <Checkbox
+                                            checked={filter.isEnabled ?? true}
+                                            onChange={(e) =>
+                                                handleToggleEnabled(
+                                                    filter.id,
+                                                    e.currentTarget.checked,
+                                                )
+                                            }
+                                        />
                                         <Select
                                             data={fieldOptions}
+                                            disabled={!filter.isEnabled}
                                             onChange={(e) =>
                                                 handleFieldChange(filter.id, e as PlayerFilterField)
                                             }
@@ -354,6 +385,7 @@ export const PlayerFilterSettings = () => {
                                         />
                                         <Select
                                             data={operators}
+                                            disabled={!filter.isEnabled}
                                             onChange={(e) =>
                                                 handleOperatorChange(
                                                     filter.id,
@@ -364,6 +396,7 @@ export const PlayerFilterSettings = () => {
                                             width="25%"
                                         />
                                         <FilterValueInput
+                                            disabled={!filter.isEnabled}
                                             field={filter.field}
                                             filterFields={filterFields}
                                             onChange={(value) =>
@@ -385,23 +418,17 @@ export const PlayerFilterSettings = () => {
                     )}
                     <Group grow>
                         <Button onClick={handleAddFilter} variant="filled">
-                            {t('common.add', { postProcess: 'titleCase' })}
+                            {t('common.add')}
                         </Button>
                     </Group>
                 </Stack>
             ),
             description: t('setting.playerFilters', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            title: t('setting.playerFilters', { postProcess: 'sentenceCase' }),
+            title: t('setting.playerFilters'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={filterOptions}
-            title={t('page.setting.playerFilters', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={filterOptions} title={t('page.setting.playerFilters')} />;
+});

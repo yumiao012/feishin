@@ -1,4 +1,6 @@
+import { openContextModal } from '@mantine/modals';
 import { CSSProperties, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import styles from './library-command-item.module.css';
 
@@ -13,12 +15,33 @@ import { useCurrentServer } from '/@/renderer/store';
 import { ActionIcon, ActionIconGroup } from '/@/shared/components/action-icon/action-icon';
 import { Flex } from '/@/shared/components/flex/flex';
 import { Text } from '/@/shared/components/text/text';
-import { LibraryItem, Song } from '/@/shared/types/domain-types';
+import { Tooltip } from '/@/shared/components/tooltip/tooltip';
+import { ExplicitStatus, LibraryItem, Song } from '/@/shared/types/domain-types';
 import { Play } from '/@/shared/types/types';
+
+const createPlayKeyDownHandler = (
+    playType: Play,
+    disabled: boolean,
+    onPlay: (type: Play) => void,
+) => {
+    return (e: React.KeyboardEvent) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!disabled) {
+                onPlay(playType);
+            }
+        } else if (e.key === 'Tab') {
+            e.stopPropagation();
+        }
+    };
+};
 
 interface LibraryCommandItemProps {
     disabled?: boolean;
+    explicitStatus?: ExplicitStatus | null;
     id: string;
+    imageId: null | string;
     imageUrl: null | string;
     isHighlighted?: boolean;
     itemType: LibraryItem;
@@ -29,7 +52,9 @@ interface LibraryCommandItemProps {
 
 export const LibraryCommandItem = ({
     disabled,
+    explicitStatus,
     id,
+    imageId,
     imageUrl,
     isHighlighted,
     itemType,
@@ -39,6 +64,7 @@ export const LibraryCommandItem = ({
 }: LibraryCommandItemProps) => {
     const { addToQueueByData, addToQueueByFetch } = usePlayer();
     const server = useCurrentServer();
+    const { t } = useTranslation();
 
     const handlePlay = useCallback(
         (playType: Play) => {
@@ -81,6 +107,39 @@ export const LibraryCommandItem = ({
         },
     });
 
+    const handleOpenPlaylistModal = useCallback(() => {
+        const modalProps: {
+            albumId?: string[];
+            artistId?: string[];
+            songId?: string[];
+        } = {};
+
+        switch (itemType) {
+            case LibraryItem.ALBUM:
+                modalProps.albumId = [id];
+                break;
+            case LibraryItem.ALBUM_ARTIST:
+            case LibraryItem.ARTIST:
+                modalProps.artistId = [id];
+                break;
+            case LibraryItem.QUEUE_SONG:
+            case LibraryItem.SONG:
+                modalProps.songId = [id];
+                break;
+            default:
+                return;
+        }
+
+        openContextModal({
+            innerProps: {
+                ...modalProps,
+            },
+            modal: 'addToPlaylist',
+            size: 'lg',
+            title: t('page.contextMenu.addToPlaylist'),
+        });
+    }, [id, itemType, t]);
+
     const [isHovered, setIsHovered] = useState(false);
 
     const showControls = isHighlighted || isHovered;
@@ -98,46 +157,89 @@ export const LibraryCommandItem = ({
                     <ItemImage
                         alt="cover"
                         className={styles.image}
+                        explicitStatus={explicitStatus ?? song?.explicitStatus ?? null}
                         height={40}
-                        id={id}
+                        id={imageId}
                         itemType={itemType}
                         src={imageUrl}
+                        type="table"
                         width={40}
                     />
                 </div>
                 <div className={styles.metadataWrapper}>
                     <Text overflow="hidden">{title}</Text>
-                    <Text isMuted overflow="hidden">
+                    <Text isMuted overflow="hidden" size="sm">
                         {subtitle}
                     </Text>
                 </div>
             </div>
             {showControls && (
-                <ActionIconGroup>
+                <ActionIconGroup className={styles.controls}>
                     <PlayTooltip disabled={disabled} type={Play.NOW}>
                         <ActionIcon
                             icon="mediaPlay"
-                            variant="subtle"
+                            size="xs"
+                            variant="default"
                             {...handlePlayNow.handlers}
                             {...handlePlayNow.props}
+                            onKeyDown={createPlayKeyDownHandler(
+                                Play.NOW,
+                                Boolean(disabled ?? handlePlayNow.props.disabled),
+                                handlePlay,
+                            )}
                         />
                     </PlayTooltip>
                     <PlayTooltip disabled={disabled} type={Play.NEXT}>
                         <ActionIcon
                             icon="mediaPlayNext"
-                            variant="subtle"
+                            size="xs"
+                            variant="default"
                             {...handlePlayNext.handlers}
                             {...handlePlayNext.props}
+                            onKeyDown={createPlayKeyDownHandler(
+                                Play.NEXT,
+                                Boolean(disabled ?? handlePlayNext.props.disabled),
+                                handlePlay,
+                            )}
                         />
                     </PlayTooltip>
                     <PlayTooltip disabled={disabled} type={Play.LAST}>
                         <ActionIcon
                             icon="mediaPlayLast"
-                            variant="subtle"
+                            size="xs"
+                            variant="default"
                             {...handlePlayLast.handlers}
                             {...handlePlayLast.props}
+                            onKeyDown={createPlayKeyDownHandler(
+                                Play.LAST,
+                                Boolean(disabled ?? handlePlayLast.props.disabled),
+                                handlePlay,
+                            )}
                         />
                     </PlayTooltip>
+                    <Tooltip disabled={disabled} label={t('action.addToPlaylist')}>
+                        <ActionIcon
+                            icon="playlistAdd"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                event.preventDefault();
+                                handleOpenPlaylistModal();
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === ' ' || e.key === 'Enter') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (!disabled) {
+                                        handleOpenPlaylistModal();
+                                    }
+                                } else if (e.key === 'Tab') {
+                                    e.stopPropagation();
+                                }
+                            }}
+                            size="xs"
+                            variant="default"
+                        />
+                    </Tooltip>
                 </ActionIconGroup>
             )}
         </Flex>

@@ -2,6 +2,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useIsFetchingItemListCount } from '/@/renderer/components/item-list/helpers/use-is-fetching-item-list';
 import { PageHeader } from '/@/renderer/components/page-header/page-header';
 import { useListContext } from '/@/renderer/context/list-context';
 import { artistsQueries } from '/@/renderer/features/artists/api/artists-api';
@@ -24,8 +25,6 @@ interface SongListHeaderProps {
 }
 
 export const SongListHeader = ({ title }: SongListHeaderProps) => {
-    const { itemCount } = useListContext();
-
     return (
         <Stack gap={0}>
             <PageHeader>
@@ -33,11 +32,7 @@ export const SongListHeader = ({ title }: SongListHeaderProps) => {
                     <LibraryHeaderBar ignoreMaxWidth>
                         <PlayButton />
                         <PageTitle title={title} />
-                        <LibraryHeaderBar.Badge
-                            isLoading={itemCount === null || itemCount === undefined}
-                        >
-                            {itemCount}
-                        </LibraryHeaderBar.Badge>
+                        <SongListHeaderBadge />
                     </LibraryHeaderBar>
                     <Group>
                         <ListSearchInput />
@@ -49,6 +44,16 @@ export const SongListHeader = ({ title }: SongListHeaderProps) => {
             </FilterBar>
         </Stack>
     );
+};
+
+const SongListHeaderBadge = () => {
+    const { itemCount } = useListContext();
+
+    const isFetching = useIsFetchingItemListCount({
+        itemType: LibraryItem.SONG,
+    });
+
+    return <LibraryHeaderBar.Badge isLoading={isFetching}>{itemCount}</LibraryHeaderBar.Badge>;
 };
 
 const PlayButton = () => {
@@ -68,7 +73,7 @@ const PlayButton = () => {
 const PageTitle = ({ title }: { title?: string }) => {
     const { t } = useTranslation();
     const { pageKey } = useListContext();
-    const pageTitle = title || t('page.trackList.title', { postProcess: 'titleCase' });
+    const pageTitle = title || t('page.trackList.title');
 
     switch (pageKey) {
         case ItemListKey.ALBUM_ARTIST_SONG:

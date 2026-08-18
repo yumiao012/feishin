@@ -1,4 +1,5 @@
 import isElectron from 'is-electron';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -10,8 +11,13 @@ import { Select } from '/@/shared/components/select/select';
 import { Switch } from '/@/shared/components/switch/switch';
 
 const localSettings = isElectron() ? window.api.localSettings : null;
+const utils = isElectron() ? window.api.utils : null;
 
-export const UpdateSettings = () => {
+function disableAutoUpdates(): boolean {
+    return Boolean(!isElectron() || utils?.disableAutoUpdates());
+}
+
+export const UpdateSettings = memo(() => {
     const { t } = useTranslation();
     const settings = useWindowSettings();
     const { setSettings } = useSettingsStoreActions();
@@ -24,28 +30,29 @@ export const UpdateSettings = () => {
                         {
                             label: t('setting.releaseChannel', {
                                 context: 'optionLatest',
-                                postProcess: 'titleCase',
                             }),
                             value: 'latest',
                         },
                         {
                             label: t('setting.releaseChannel', {
                                 context: 'optionBeta',
-                                postProcess: 'titleCase',
                             }),
                             value: 'beta',
                         },
+                        {
+                            label: t('setting.releaseChannel', {
+                                context: 'optionAlpha',
+                            }),
+                            value: 'alpha',
+                        },
                     ]}
-                    defaultValue={
-                        (localSettings?.get('release_channel') as string | undefined) || 'latest'
-                    }
+                    defaultValue={settings.releaseChannel || 'latest'}
                     onChange={(value) => {
                         if (!value) return;
                         localSettings?.set('release_channel', value);
                         setSettings({
                             window: {
-                                ...settings,
-                                releaseChannel: value as 'beta' | 'latest',
+                                releaseChannel: value as 'alpha' | 'beta' | 'latest',
                             },
                         });
                     }}
@@ -53,42 +60,35 @@ export const UpdateSettings = () => {
             ),
             description: t('setting.releaseChannel', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            isHidden: !isElectron(),
-            title: t('setting.releaseChannel', { postProcess: 'sentenceCase' }),
+            isHidden: disableAutoUpdates(),
+            title: t('setting.releaseChannel'),
         },
         {
             control: (
                 <Switch
-                    aria-label="Disable automatic updates"
-                    defaultChecked={settings.disableAutoUpdate}
-                    disabled={!isElectron()}
+                    aria-label={t('setting.automaticUpdates')}
+                    defaultChecked={!settings.disableAutoUpdate}
+                    disabled={disableAutoUpdates()}
                     onChange={(e) => {
                         if (!e) return;
-                        localSettings?.set('disable_auto_updates', e.currentTarget.checked);
+                        const enabled = e.currentTarget.checked;
+                        localSettings?.set('disable_auto_updates', !enabled);
                         setSettings({
                             window: {
-                                ...settings,
-                                disableAutoUpdate: e.currentTarget.checked,
+                                disableAutoUpdate: !enabled,
                             },
                         });
                     }}
                 />
             ),
-            description: t('setting.disableAutomaticUpdates', {
+            description: t('setting.automaticUpdates', {
                 context: 'description',
-                postProcess: 'sentenceCase',
             }),
-            isHidden: !isElectron(),
-            title: t('setting.disableAutomaticUpdates', { postProcess: 'sentenceCase' }),
+            isHidden: disableAutoUpdates(),
+            title: t('setting.automaticUpdates'),
         },
     ];
 
-    return (
-        <SettingsSection
-            options={updateOptions}
-            title={t('page.setting.updates', { postProcess: 'sentenceCase' })}
-        />
-    );
-};
+    return <SettingsSection options={updateOptions} title={t('page.setting.updates')} />;
+});

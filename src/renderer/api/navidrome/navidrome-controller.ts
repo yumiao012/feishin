@@ -1,25 +1,40 @@
+import axios from 'axios';
 import { set } from 'idb-keyval';
+import orderBy from 'lodash/orderBy';
 
 import { ndApiClient } from '/@/renderer/api/navidrome/navidrome-api';
 import { ssApiClient } from '/@/renderer/api/subsonic/subsonic-api';
 import { SubsonicController } from '/@/renderer/api/subsonic/subsonic-controller';
 import { ndNormalize } from '/@/shared/api/navidrome/navidrome-normalize';
-import { NDSongListSort } from '/@/shared/api/navidrome/navidrome-types';
+import { NDRadioListSort, NDSongListSort } from '/@/shared/api/navidrome/navidrome-types';
 import { ssNormalize } from '/@/shared/api/subsonic/subsonic-normalize';
 import { getFeatures, hasFeature, hasFeatureWithVersion, VersionInfo } from '/@/shared/api/utils';
 import {
     albumArtistListSortMap,
     albumListSortMap,
     AuthenticationResponse,
-    genreListSortMap,
+    DeleteArtistImageArgs,
+    DeleteArtistImageResponse,
+    DeleteInternetRadioStationImageArgs,
+    DeleteInternetRadioStationImageResponse,
+    DeletePlaylistImageArgs,
+    DeletePlaylistImageResponse,
     InternalControllerEndpoint,
     playlistListSortMap,
     PlaylistSongListArgs,
     PlaylistSongListResponse,
     ServerListItemWithCredential,
+    SongListSort,
     songListSortMap,
+    SortOrder,
     sortOrderMap,
     tagListSortMap,
+    UploadArtistImageArgs,
+    UploadArtistImageResponse,
+    UploadInternetRadioStationImageArgs,
+    UploadInternetRadioStationImageResponse,
+    UploadPlaylistImageArgs,
+    UploadPlaylistImageResponse,
     userListSortMap,
 } from '/@/shared/types/domain-types';
 import { ServerFeature } from '/@/shared/types/features-types';
@@ -27,6 +42,15 @@ import { ServerFeature } from '/@/shared/types/features-types';
 const VERSION_INFO: VersionInfo = [
     // Why 2? Subsonic controller will return 1 for its own implementation
     // Use 2 to denote that Navidrome's own API has a different endpoint
+    [
+        '0.61.0',
+        {
+            [ServerFeature.ARTIST_IMAGE_UPLOAD]: [1],
+            [ServerFeature.INTERNET_RADIO_IMAGE_UPLOAD]: [1],
+            [ServerFeature.PLAYLIST_IMAGE_UPLOAD]: [1],
+        },
+    ],
+    ['0.60.4', { [ServerFeature.TRACK_YES_NO_RATING_FILTER]: [1] }],
     ['0.57.0', { [ServerFeature.SERVER_PLAY_QUEUE]: [2] }],
     ['0.56.0', { [ServerFeature.TRACK_ALBUM_ARTIST_SEARCH]: [1] }],
     ['0.55.0', { [ServerFeature.BFR]: [1], [ServerFeature.TAGS]: [1] }],
@@ -59,22 +83,21 @@ const EXCLUDED_ALBUM_TAGS = new Set<string>([
     'asin',
     'barcode',
     'copyright',
-    'disctotal',
     'encodedby',
     'isrc',
     'key',
     'language',
     'musicbrainz_workid',
     'script',
-    'tracktotal',
     'website',
     'work',
 ]);
 
-const EXCLUDED_SONG_TAGS = new Set<string>([]);
+const EXCLUDED_SONG_TAGS = new Set<string>(['disctotal', 'tracktotal']);
 
-// Tags that use IDs as values as opposed to the tag value
-const ID_TAGS = new Set<string>(['albumversion', 'mood']);
+// Defining a re-usable Collator instance for performance reasons.
+const numericSortCollator = new Intl.Collator(undefined, { numeric: true });
+const collator = new Intl.Collator();
 
 const excludeMissing = (server?: null | ServerListItemWithCredential) => {
     if (!server) {
@@ -164,8 +187,54 @@ export const NavidromeController: InternalControllerEndpoint = {
             id: res.body.data.id,
         };
     },
+    deleteArtistImage: async (args: DeleteArtistImageArgs): Promise<DeleteArtistImageResponse> => {
+        const { apiClientProps, query } = args;
+
+        const res = await ndApiClient(apiClientProps as any).deleteArtistImage({
+            params: {
+                id: query.id,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to delete artist image');
+        }
+
+        return res.body.data.status === 'ok';
+    },
     deleteFavorite: SubsonicController.deleteFavorite,
-    deleteInternetRadioStation: SubsonicController.deleteInternetRadioStation,
+    deleteInternetRadioStation: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const res = await ndApiClient(apiClientProps).deleteInternetRadioStation({
+            params: {
+                id: query.id,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to delete internet radio station');
+        }
+
+        return null;
+    },
+    deleteInternetRadioStationImage: async (
+        args: DeleteInternetRadioStationImageArgs,
+    ): Promise<DeleteInternetRadioStationImageResponse> => {
+        const { apiClientProps, query } = args;
+
+        const res = await ndApiClient(apiClientProps as any).deleteInternetRadioStationImage({
+            params: {
+                id: query.id,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to delete internet radio station image');
+        }
+
+        return res.body.data.status === 'ok';
+    },
     deletePlaylist: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -181,18 +250,28 @@ export const NavidromeController: InternalControllerEndpoint = {
 
         return null;
     },
-    getAlbumArtistDetail: async (args) => {
+    deletePlaylistImage: async (
+        args: DeletePlaylistImageArgs,
+    ): Promise<DeletePlaylistImageResponse> => {
         const { apiClientProps, query } = args;
 
-        const res = await ndApiClient(apiClientProps).getAlbumArtistDetail({
+        const res = await ndApiClient(apiClientProps as any).deletePlaylistImage({
             params: {
                 id: query.id,
             },
         });
 
-        const artistInfoRes = await ssApiClient(apiClientProps).getArtistInfo({
-            query: {
-                count: 10,
+        if (res.status !== 200) {
+            throw new Error('Failed to delete playlist image');
+        }
+
+        return res.body.data.status === 'ok';
+    },
+    getAlbumArtistDetail: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const res = await ndApiClient(apiClientProps).getAlbumArtistDetail({
+            params: {
                 id: query.id,
             },
         });
@@ -205,22 +284,42 @@ export const NavidromeController: InternalControllerEndpoint = {
             throw new Error('Server is required');
         }
 
-        // Prefer images from getArtistInfo first (which should be proxied)
-        // Prioritize large > medium > small
-        return ndNormalize.albumArtist(
-            {
-                ...res.body.data,
-                ...(artistInfoRes.status === 200 && {
-                    largeImageUrl:
-                        artistInfoRes.body.artistInfo.largeImageUrl ||
-                        artistInfoRes.body.artistInfo.mediumImageUrl ||
-                        artistInfoRes.body.artistInfo.smallImageUrl ||
-                        res.body.data.largeImageUrl,
-                    similarArtists: artistInfoRes.body.artistInfo.similarArtist,
-                }),
+        return ndNormalize.albumArtist(res.body.data, apiClientProps.server);
+    },
+    getAlbumArtistInfo: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const artistInfoRes = await ssApiClient(apiClientProps).getArtistInfo2({
+            query: {
+                id: query.id,
+                ...(query.limit != null && { count: query.limit }),
             },
-            apiClientProps.server,
-        );
+        });
+
+        if (artistInfoRes.status !== 200) {
+            return null;
+        }
+
+        const artistInfo = artistInfoRes.body.artistInfo2;
+        const imageUrl =
+            artistInfo?.largeImageUrl ||
+            artistInfo?.mediumImageUrl ||
+            artistInfo?.smallImageUrl ||
+            null;
+
+        return {
+            biography: artistInfo?.biography || null,
+            imageUrl,
+            similarArtists:
+                artistInfo?.similarArtist?.map((artist) => ({
+                    id: String(artist.id),
+                    imageId: String(artist.id),
+                    imageUrl: null,
+                    name: artist.name,
+                    userFavorite: Boolean(artist.starred) || false,
+                    userRating: artist.userRating ?? null,
+                })) ?? null,
+        };
     },
     getAlbumArtistList: async (args) => {
         const { apiClientProps, query } = args;
@@ -322,13 +421,17 @@ export const NavidromeController: InternalControllerEndpoint = {
             ? query.genreIds
             : query.genreIds?.[0];
 
+        const artistIds = hasFeature(apiClientProps.server, ServerFeature.BFR)
+            ? query.artistIds
+            : query.artistIds?.[0];
+
         const res = await ndApiClient(apiClientProps).getAlbumList({
             query: {
                 _end: query.startIndex + (query.limit || 0),
                 _order: sortOrderMap.navidrome[query.sortOrder],
                 _sort: albumListSortMap.navidrome[query.sortBy],
                 _start: query.startIndex,
-                artist_id: query.artistIds?.[0],
+                artist_id: artistIds,
                 compilation: query.compilation,
                 genre_id: genres,
                 has_rating: query.hasRating,
@@ -357,6 +460,32 @@ export const NavidromeController: InternalControllerEndpoint = {
             apiClientProps,
             query: { ...query, limit: 1, startIndex: 0 },
         }).then((result) => result!.totalRecordCount!),
+    getAlbumRadio: async (args) => {
+        const { apiClientProps, query } = args;
+
+        // Use getSimilarSongs API for album radio
+        const res = await ssApiClient({
+            ...apiClientProps,
+            silent: true,
+        }).getSimilarSongs({
+            query: {
+                count: query.count,
+                id: query.albumId,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to get album radio songs');
+        }
+
+        if (!res.body.similarSongs?.song) {
+            return [];
+        }
+
+        return res.body.similarSongs.song.map((song) =>
+            ssNormalize.song(song, apiClientProps.server),
+        );
+    },
     getArtistList: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -428,6 +557,57 @@ export const NavidromeController: InternalControllerEndpoint = {
         );
     },
     getDownloadUrl: SubsonicController.getDownloadUrl,
+    getFavoriteSongs: async (args) => {
+        const { apiClientProps, query } = args;
+
+        // if user selects 'rating'
+        if (query.type === 'rating') {
+            const res = await NavidromeController.getSongList({
+                apiClientProps,
+                query: {
+                    artistIds: [query.artistId],
+                    sortBy: SongListSort.RATING,
+                    sortOrder: SortOrder.DESC,
+                    startIndex: 0,
+                },
+            });
+
+            const songsWithHighRating = orderBy(
+                res.items.filter((song) => song.userRating !== null && song.userRating > 2),
+                ['userRating', 'userFavorite', 'playCount', 'albumId', 'trackNumber'],
+                ['desc', 'desc', 'desc', 'asc', 'asc'],
+            );
+
+            return {
+                items: songsWithHighRating,
+                startIndex: 0,
+                totalRecordCount: res.totalRecordCount,
+            };
+        }
+
+        // else if user selects 'favorite'
+        const res = await NavidromeController.getSongList({
+            apiClientProps,
+            query: {
+                artistIds: [query.artistId],
+                sortBy: SongListSort.FAVORITED,
+                sortOrder: SortOrder.DESC,
+                startIndex: 0,
+            },
+        });
+
+        const songsWithFavorite = orderBy(
+            res.items.filter((song) => song.userFavorite),
+            ['userFavorite', 'userRating', 'playCount', 'albumId', 'trackNumber'],
+            ['desc', 'desc', 'desc', 'asc', 'asc'],
+        );
+
+        return {
+            items: songsWithFavorite,
+            startIndex: 0,
+            totalRecordCount: res.totalRecordCount,
+        };
+    },
     getFolder: SubsonicController.getFolder,
     getGenreList: async (args) => {
         const { apiClientProps, query } = args;
@@ -466,29 +646,28 @@ export const NavidromeController: InternalControllerEndpoint = {
             };
         }
 
-        const res = await ndApiClient(apiClientProps).getGenreList({
+        return SubsonicController.getGenreList(args);
+    },
+    getImageRequest: SubsonicController.getImageRequest,
+    getImageUrl: SubsonicController.getImageUrl,
+    getInternetRadioStations: async (args) => {
+        const { apiClientProps } = args;
+
+        const res = await ndApiClient(apiClientProps).getRadioList({
             query: {
-                _end: query.startIndex + (query.limit || 0),
-                _order: sortOrderMap.navidrome[query.sortOrder],
-                _sort: genreListSortMap.navidrome[query.sortBy],
-                _start: query.startIndex,
-                library_id: getLibraryId(query.musicFolderId),
-                name: query.searchTerm,
+                _end: -1,
+                _order: 'ASC',
+                _sort: NDRadioListSort.NAME,
+                _start: 0,
             },
         });
 
         if (res.status !== 200) {
-            throw new Error('Failed to get genre list');
+            throw new Error('Failed to get internet radio stations');
         }
 
-        return {
-            items: res.body.data.map((genre) => ndNormalize.genre(genre, apiClientProps.server)),
-            startIndex: query.startIndex || 0,
-            totalRecordCount: Number(res.body.headers.get('x-total-count') || 0),
-        };
+        return res.body.data.map((station) => ndNormalize.internetRadioStation(station));
     },
-    getImageUrl: SubsonicController.getImageUrl,
-    getInternetRadioStations: SubsonicController.getInternetRadioStations,
     getLyrics: SubsonicController.getLyrics,
     getMusicFolderList: SubsonicController.getMusicFolderList,
     getPlaylistDetail: async (args) => {
@@ -535,6 +714,11 @@ export const NavidromeController: InternalControllerEndpoint = {
             apiClientProps,
             query: { ...query, limit: 1, startIndex: 0 },
         }).then((result) => result!.totalRecordCount!),
+    getPlaylistSongIds: async (args) =>
+        NavidromeController.getPlaylistSongList(args).then((result) => ({
+            ...result,
+            items: result.items.map((song) => song.id),
+        })),
     getPlaylistSongList: async (args: PlaylistSongListArgs): Promise<PlaylistSongListResponse> => {
         const { apiClientProps, query } = args;
 
@@ -545,6 +729,7 @@ export const NavidromeController: InternalControllerEndpoint = {
             query: {
                 _end: -1,
                 _order: 'ASC',
+                _sort: NDSongListSort.ID,
                 _start: 0,
                 ...excludeMissing(apiClientProps.server),
             },
@@ -570,7 +755,7 @@ export const NavidromeController: InternalControllerEndpoint = {
                 throw new Error('Failed to get play queue');
             }
 
-            const { changedBy, current, items, position, updatedAt } = res.body.data;
+            const { changedBy, current, items = [], position, updatedAt } = res.body.data; // if there is no queue saved, items is undefined
 
             const entries = items.map((song) => ndNormalize.song(song, apiClientProps.server));
 
@@ -589,6 +774,7 @@ export const NavidromeController: InternalControllerEndpoint = {
     getRandomSongList: SubsonicController.getRandomSongList,
     getRoles: async ({ apiClientProps }) =>
         hasFeature(apiClientProps.server, ServerFeature.BFR) ? NAVIDROME_ROLES : [],
+    getScanStatus: SubsonicController.getScanStatus,
     getServerInfo: async (args) => {
         const { apiClientProps } = args;
 
@@ -610,6 +796,8 @@ export const NavidromeController: InternalControllerEndpoint = {
             ...subsonicArgs.features,
             ...navidromeFeatures,
             publicPlaylist: [1],
+            [ServerFeature.ALBUM_YES_NO_RATING_FILTER]: [1],
+            [ServerFeature.JUKEBOX]: [1],
             [ServerFeature.MUSIC_FOLDER_MULTISELECT]: [1],
         };
 
@@ -668,32 +856,67 @@ export const NavidromeController: InternalControllerEndpoint = {
     getSongList: async (args) => {
         const { apiClientProps, query } = args;
 
-        const res = await ndApiClient(apiClientProps).getSongList({
-            query: {
-                _end: query.startIndex + (query.limit || -1),
-                _order: sortOrderMap.navidrome[query.sortOrder],
-                _sort: songListSortMap.navidrome[query.sortBy],
-                _start: query.startIndex,
-                album_id: query.albumIds,
-                genre_id: query.genreIds,
-                [getArtistSongKey(apiClientProps.server)]: query.artistIds ?? query.albumArtistIds,
-                library_id: getLibraryId(query.musicFolderId),
-                starred: query.favorite,
-                title: query.searchTerm,
-                year: query.maxYear || query.minYear,
-                ...query._custom,
-                ...excludeMissing(apiClientProps.server),
-            },
-        });
+        const ALBUM_IDS_BATCH_SIZE = 500;
+        const albumIds = query.albumIds;
+        const shouldBatch = albumIds && albumIds.length > ALBUM_IDS_BATCH_SIZE;
 
-        if (res.status !== 200) {
-            throw new Error('Failed to get song list');
+        const fetchAlbums = async (albumIdBatch: string[] | undefined) => {
+            const res = await ndApiClient(apiClientProps).getSongList({
+                query: {
+                    _end: query.startIndex + (query.limit || -1),
+                    _order: sortOrderMap.navidrome[query.sortOrder],
+                    _sort: songListSortMap.navidrome[query.sortBy],
+                    _start: query.startIndex,
+                    album_id: albumIdBatch ?? query.albumIds,
+                    genre_id: query.genreIds,
+                    [getArtistSongKey(apiClientProps.server)]:
+                        query.artistIds ?? query.albumArtistIds,
+                    ...(hasFeature(
+                        apiClientProps.server,
+                        ServerFeature.TRACK_YES_NO_RATING_FILTER,
+                    ) && query.hasRating !== undefined
+                        ? { has_rating: query.hasRating }
+                        : {}),
+                    library_id: getLibraryId(query.musicFolderId),
+                    starred: query.favorite,
+                    title: query.searchTerm,
+                    year: query.maxYear || query.minYear,
+                    ...query._custom,
+                    ...excludeMissing(apiClientProps.server),
+                },
+            });
+
+            if (res.status !== 200) {
+                throw new Error('Failed to get song list');
+            }
+
+            return {
+                items: res.body.data.map((song) => ndNormalize.song(song, apiClientProps.server)),
+                totalRecordCount: Number(res.body.headers.get('x-total-count') || 0),
+            };
+        };
+
+        if (shouldBatch && albumIds) {
+            const batches: string[][] = [];
+            for (let i = 0; i < albumIds.length; i += ALBUM_IDS_BATCH_SIZE) {
+                batches.push(albumIds.slice(i, i + ALBUM_IDS_BATCH_SIZE));
+            }
+
+            const results = await Promise.all(batches.map((batch) => fetchAlbums(batch)));
+
+            return {
+                items: results.flatMap((r) => r.items),
+                startIndex: query?.startIndex ?? 0,
+                totalRecordCount: results.reduce((sum, r) => sum + r.totalRecordCount, 0),
+            };
         }
 
+        const albums = await fetchAlbums(undefined);
+
         return {
-            items: res.body.data.map((song) => ndNormalize.song(song, apiClientProps.server)),
-            startIndex: query?.startIndex || 0,
-            totalRecordCount: Number(res.body.headers.get('x-total-count') || 0),
+            items: albums.items,
+            startIndex: query?.startIndex ?? 0,
+            totalRecordCount: albums.totalRecordCount,
         };
     },
     getSongListCount: async ({ apiClientProps, query }) =>
@@ -701,13 +924,14 @@ export const NavidromeController: InternalControllerEndpoint = {
             apiClientProps,
             query: { ...query, limit: 1, startIndex: 0 },
         }).then((result) => result!.totalRecordCount!),
+
     getStreamUrl: SubsonicController.getStreamUrl,
     getStructuredLyrics: SubsonicController.getStructuredLyrics,
     getTagList: async (args) => {
         const { apiClientProps } = args;
 
         if (!hasFeature(apiClientProps.server, ServerFeature.TAGS)) {
-            return { boolTags: undefined, enumTags: undefined, excluded: { album: [], song: [] } };
+            return { excluded: { album: [], song: [] } };
         }
 
         const res = await ndApiClient(apiClientProps).getTagList({
@@ -724,13 +948,13 @@ export const NavidromeController: InternalControllerEndpoint = {
             if (!EXCLUDED_TAGS.has(tag.tagName)) {
                 if (tagsToValues.has(tag.tagName)) {
                     tagsToValues.get(tag.tagName)!.push({
-                        id: ID_TAGS.has(tag.tagName) ? tag.id : tag.tagValue,
+                        id: tag.id,
                         name: tag.tagValue,
                     });
                 } else {
                     tagsToValues.set(tag.tagName, [
                         {
-                            id: ID_TAGS.has(tag.tagName) ? tag.id : tag.tagValue,
+                            id: tag.id,
                             name: tag.tagValue,
                         },
                     ]);
@@ -738,30 +962,81 @@ export const NavidromeController: InternalControllerEndpoint = {
             }
         }
 
-        const enumTags = Array.from(tagsToValues)
+        const tags = Array.from(tagsToValues)
             .map((data) => ({
                 name: data[0],
                 options: data[1]
-                    .sort((a, b) =>
-                        a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase()),
-                    )
+                    .sort((a, b) => {
+                        return numericSortCollator.compare(
+                            a.name.toLocaleLowerCase(),
+                            b.name.toLocaleLowerCase(),
+                        );
+                    })
                     .map((option) => ({ id: option.id, name: option.name })),
             }))
-            .sort((a, b) => a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase()));
+            .sort((a, b) =>
+                collator.compare(a.name.toLocaleLowerCase(), b.name.toLocaleLowerCase()),
+            );
 
         const excludedAlbumTags = Array.from(EXCLUDED_ALBUM_TAGS.values());
         const excludedSongTags = Array.from(EXCLUDED_SONG_TAGS.values());
 
         return {
-            boolTags: undefined,
-            enumTags,
             excluded: {
                 album: excludedAlbumTags,
                 song: excludedSongTags,
             },
+            tags,
         };
     },
-    getTopSongs: SubsonicController.getTopSongs,
+    getTopSongs: async (args) => {
+        const { apiClientProps, query } = args;
+
+        const type = query.type === 'personal' ? 'personal' : 'community';
+
+        if (type === 'community') {
+            const res = await ssApiClient(apiClientProps).getTopSongsList({
+                query: {
+                    artist: query.artist,
+                    count: query.limit,
+                },
+            });
+
+            if (res.status !== 200) {
+                throw new Error('Failed to get top songs');
+            }
+
+            return {
+                items: (res.body.topSongs?.song || []).map((song) =>
+                    ssNormalize.song(song, apiClientProps.server),
+                ),
+                startIndex: 0,
+                totalRecordCount: res.body.topSongs?.song?.length || 0,
+            };
+        }
+
+        const res = await NavidromeController.getSongList({
+            apiClientProps,
+            query: {
+                artistIds: [query.artistId],
+                sortBy: SongListSort.PLAY_COUNT,
+                sortOrder: SortOrder.DESC,
+                startIndex: 0,
+            },
+        });
+
+        const songsWithPlayCount = orderBy(
+            res.items.filter((song) => song.playCount > 0),
+            ['playCount', 'albumId', 'trackNumber'],
+            ['desc', 'asc', 'asc'],
+        );
+
+        return {
+            items: songsWithPlayCount,
+            startIndex: 0,
+            totalRecordCount: res.totalRecordCount,
+        };
+    },
     getUserInfo: SubsonicController.getUserInfo,
     getUserList: async (args) => {
         const { apiClientProps, query } = args;
@@ -786,6 +1061,7 @@ export const NavidromeController: InternalControllerEndpoint = {
             totalRecordCount: Number(res.body.headers.get('x-total-count') || 0),
         };
     },
+    jukeboxControl: SubsonicController.jukeboxControl,
     movePlaylistItem: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -803,6 +1079,7 @@ export const NavidromeController: InternalControllerEndpoint = {
             throw new Error('Failed to move item in playlist');
         }
     },
+    refreshItems: SubsonicController.refreshItems,
     removeFromPlaylist: async (args) => {
         const { apiClientProps, query } = args;
 
@@ -832,6 +1109,7 @@ export const NavidromeController: InternalControllerEndpoint = {
             query: {
                 _end: -1,
                 _order: 'ASC',
+                _sort: NDSongListSort.ID,
                 _start: 0,
                 ...excludeMissing(apiClientProps.server),
             },
@@ -937,6 +1215,7 @@ export const NavidromeController: InternalControllerEndpoint = {
     },
     scrobble: SubsonicController.scrobble,
     search: SubsonicController.search,
+    setPlaylistSongs: SubsonicController.setPlaylistSongs,
     setRating: SubsonicController.setRating,
     shareItem: async (args) => {
         const { apiClientProps, body } = args;
@@ -945,9 +1224,9 @@ export const NavidromeController: InternalControllerEndpoint = {
             body: {
                 description: body.description,
                 downloadable: body.downloadable,
-                expires: body.expires,
                 resourceIds: body.resourceIds,
                 resourceType: body.resourceType,
+                ...(body.expires !== undefined ? { expires: body.expires } : {}),
             },
         });
 
@@ -959,7 +1238,27 @@ export const NavidromeController: InternalControllerEndpoint = {
             id: res.body.data.id,
         };
     },
-    updateInternetRadioStation: SubsonicController.updateInternetRadioStation,
+    startLibraryScan: SubsonicController.startLibraryScan,
+    updateInternetRadioStation: async (args) => {
+        const { apiClientProps, body, query } = args;
+
+        const res = await ndApiClient(apiClientProps).updateInternetRadioStation({
+            body: {
+                homePageUrl: body.homepageUrl ?? '',
+                name: body.name,
+                streamUrl: body.streamUrl,
+            },
+            params: {
+                id: query.id,
+            },
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to update internet radio station');
+        }
+
+        return null;
+    },
     updatePlaylist: async (args) => {
         const { apiClientProps, body, query } = args;
 
@@ -983,5 +1282,111 @@ export const NavidromeController: InternalControllerEndpoint = {
         }
 
         return null;
+    },
+    uploadArtistImage: async (args: UploadArtistImageArgs): Promise<UploadArtistImageResponse> => {
+        const { apiClientProps, body, query } = args;
+
+        const server = apiClientProps.server;
+        const serverUrl = server?.url?.replace(/\/$/, '');
+
+        if (!serverUrl) {
+            throw new Error('Server is required');
+        }
+
+        const form = new FormData();
+        const bytes = body.image as Uint8Array<ArrayBuffer>;
+        const fileLike =
+            typeof File !== 'undefined'
+                ? new File([bytes], 'image', { type: 'application/octet-stream' })
+                : new Blob([bytes], { type: 'application/octet-stream' });
+        form.append('image', fileLike as any);
+
+        const res = await axios.post(`${serverUrl}/api/artist/${query.id}/image`, form, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...(server?.ndCredential && {
+                    'x-nd-authorization': `Bearer ${server.ndCredential}`,
+                }),
+            },
+            signal: apiClientProps.signal,
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to upload artist image');
+        }
+
+        return res.data?.status === 'ok';
+    },
+    uploadInternetRadioStationImage: async (
+        args: UploadInternetRadioStationImageArgs,
+    ): Promise<UploadInternetRadioStationImageResponse> => {
+        const { apiClientProps, body, query } = args;
+
+        const server = apiClientProps.server;
+        const serverUrl = server?.url?.replace(/\/$/, '');
+
+        if (!serverUrl) {
+            throw new Error('Server is required');
+        }
+
+        const form = new FormData();
+        const bytes = body.image as Uint8Array<ArrayBuffer>;
+        const fileLike =
+            typeof File !== 'undefined'
+                ? new File([bytes], 'image', { type: 'application/octet-stream' })
+                : new Blob([bytes], { type: 'application/octet-stream' });
+        form.append('image', fileLike as any);
+
+        const res = await axios.post(`${serverUrl}/api/radio/${query.id}/image`, form, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...(server?.ndCredential && {
+                    'x-nd-authorization': `Bearer ${server.ndCredential}`,
+                }),
+            },
+            signal: apiClientProps.signal,
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to upload internet radio station image');
+        }
+
+        return res.data?.status === 'ok';
+    },
+    uploadPlaylistImage: async (
+        args: UploadPlaylistImageArgs,
+    ): Promise<UploadPlaylistImageResponse> => {
+        const { apiClientProps, body, query } = args;
+
+        const server = apiClientProps.server;
+        const serverUrl = server?.url?.replace(/\/$/, '');
+
+        if (!serverUrl) {
+            throw new Error('Server is required');
+        }
+
+        const form = new FormData();
+        const bytes = body.image as Uint8Array<ArrayBuffer>;
+        const fileLike =
+            typeof File !== 'undefined'
+                ? new File([bytes], 'image', { type: 'application/octet-stream' })
+                : new Blob([bytes], { type: 'application/octet-stream' });
+        form.append('image', fileLike as any);
+
+        const res = await axios.post(`${serverUrl}/api/playlist/${query.id}/image`, form, {
+            headers: {
+                'Content-Type': 'multipart/form-data',
+                ...(server?.ndCredential && {
+                    'x-nd-authorization': `Bearer ${server.ndCredential}`,
+                }),
+            },
+            signal: apiClientProps.signal,
+        });
+
+        if (res.status !== 200) {
+            throw new Error('Failed to upload playlist image');
+        }
+
+        return res.data?.status === 'ok';
     },
 };

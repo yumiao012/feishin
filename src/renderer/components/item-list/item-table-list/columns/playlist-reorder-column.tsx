@@ -19,12 +19,14 @@ import { useLongPress } from '/@/shared/hooks/use-long-press';
 import { LibraryItem } from '/@/shared/types/domain-types';
 import { DragOperation, DragTarget, DragTargetMap } from '/@/shared/types/drag-and-drop';
 
-export const PlaylistReorderColumn = (props: ItemTableListInnerColumn) => {
+const PlaylistReorderColumnBase = (props: ItemTableListInnerColumn) => {
     const { t } = useTranslation();
     const { playlistId } = useParams() as { playlistId?: string };
     const isHeaderEnabled = !!props.enableHeader;
     const isDataRow = isHeaderEnabled ? props.rowIndex > 0 : true;
-    const item = isDataRow ? props.data[props.rowIndex] : null;
+    const item = isDataRow
+        ? (props.getRowItem?.(props.rowIndex) ?? props.data[props.rowIndex])
+        : null;
 
     const isPlaylistSong = props.itemType === LibraryItem.PLAYLIST_SONG;
 
@@ -153,8 +155,8 @@ export const PlaylistReorderColumn = (props: ItemTableListInnerColumn) => {
     const isDragging = props.internalState ? isDraggingState : isDraggingLocal;
 
     const getValidDataItems = useCallback(() => {
-        return props.data.filter((d) => d !== null && (d as any).id);
-    }, [props.data]);
+        return props.internalState.getData().filter((d) => d !== null && (d as any).id);
+    }, [props.internalState]);
 
     const handleMoveUp = useCallback(() => {
         if (!item || !isDataRow || !isPlaylistSong || !playlistId) {
@@ -311,12 +313,10 @@ export const PlaylistReorderColumn = (props: ItemTableListInnerColumn) => {
                             <>
                                 <Stack gap="xs" justify="center">
                                     <Text fw={500} ta="center">
-                                        {t('action.moveUp', { postProcess: 'sentenceCase' })}
+                                        {t('action.moveUp')}
                                     </Text>
                                     <Text fw={500} isMuted size="xs" ta="center">
-                                        {t('action.holdToMoveToTop', {
-                                            postProcess: 'sentenceCase',
-                                        })}
+                                        {t('action.holdToMoveToTop')}
                                     </Text>
                                 </Stack>
                             </>
@@ -334,12 +334,10 @@ export const PlaylistReorderColumn = (props: ItemTableListInnerColumn) => {
                             <>
                                 <Stack gap="xs" justify="center">
                                     <Text fw={500} ta="center">
-                                        {t('action.moveDown', { postProcess: 'sentenceCase' })}
+                                        {t('action.moveDown')}
                                     </Text>
                                     <Text fw={500} isMuted size="xs" ta="center">
-                                        {t('action.holdToMoveToBottom', {
-                                            postProcess: 'sentenceCase',
-                                        })}
+                                        {t('action.holdToMoveToBottom')}
                                     </Text>
                                 </Stack>
                             </>
@@ -361,3 +359,5 @@ export const PlaylistReorderColumn = (props: ItemTableListInnerColumn) => {
         </TableColumnContainer>
     );
 };
+
+export const PlaylistReorderColumn = PlaylistReorderColumnBase;

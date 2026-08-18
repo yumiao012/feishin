@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { QueryBuilderOption } from '/@/renderer/components/query-builder/query-builder-option';
@@ -78,14 +79,12 @@ export const QueryBuilder = ({
         {
             label: t('form.queryEditor.input', {
                 context: 'optionMatchAll',
-                postProcess: 'sentenceCase',
             }),
             value: 'all',
         },
         {
             label: t('form.queryEditor.input', {
                 context: 'optionMatchAny',
-                postProcess: 'sentenceCase',
             }),
             value: 'any',
         },
@@ -107,15 +106,17 @@ export const QueryBuilder = ({
         onChangeType({ groupIndex, level, value });
     };
 
+    const boxStyle = useMemo(
+        () => ({
+            border: '1px solid var(--theme-colors-border)',
+            borderRadius: 'var(--theme-radius-md)',
+            marginLeft: level > 0 ? '20px' : '0px',
+        }),
+        [level],
+    );
+
     return (
-        <Box
-            p="md"
-            style={{
-                border: '1px solid var(--theme-colors-border)',
-                borderRadius: 'var(--theme-radius-md)',
-                marginLeft: level > 0 ? '20px' : '0px',
-            }}
-        >
+        <Box p="md" style={boxStyle}>
             <Stack gap="sm">
                 <Group gap="sm" justify="space-between" wrap="nowrap">
                     <Group gap="sm" wrap="nowrap">
@@ -143,9 +144,7 @@ export const QueryBuilder = ({
                                     leftSection={<Icon icon="add" />}
                                     onClick={handleAddRuleGroup}
                                 >
-                                    {t('form.queryEditor.addRuleGroup', {
-                                        postProcess: 'sentenceCase',
-                                    })}
+                                    {t('form.queryEditor.addRuleGroup')}
                                 </DropdownMenu.Item>
 
                                 {level > 0 && (
@@ -153,9 +152,7 @@ export const QueryBuilder = ({
                                         leftSection={<Icon icon="delete" />}
                                         onClick={handleDeleteRuleGroup}
                                     >
-                                        {t('form.queryEditor.removeRuleGroup', {
-                                            postProcess: 'sentenceCase',
-                                        })}
+                                        {t('form.queryEditor.removeRuleGroup')}
                                     </DropdownMenu.Item>
                                 )}
                                 {level === 0 && (
@@ -166,18 +163,14 @@ export const QueryBuilder = ({
                                             leftSection={<Icon color="error" icon="refresh" />}
                                             onClick={onResetFilters}
                                         >
-                                            {t('form.queryEditor.resetToDefault', {
-                                                postProcess: 'sentenceCase',
-                                            })}
+                                            {t('form.queryEditor.resetToDefault')}
                                         </DropdownMenu.Item>
                                         <DropdownMenu.Item
                                             isDanger
                                             leftSection={<Icon color="error" icon="delete" />}
                                             onClick={onClearFilters}
                                         >
-                                            {t('form.queryEditor.clearFilters', {
-                                                postProcess: 'sentenceCase',
-                                            })}
+                                            {t('form.queryEditor.clearFilters')}
                                         </DropdownMenu.Item>
                                     </>
                                 )}
@@ -193,7 +186,7 @@ export const QueryBuilder = ({
                             filters={filters}
                             groupIndex={groupIndex || []}
                             level={level}
-                            noRemove={data?.rules?.length === 1}
+                            noRemove={false}
                             onChangeField={onChangeField}
                             onChangeOperator={onChangeOperator}
                             onChangeValue={onChangeValue}

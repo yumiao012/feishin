@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { t } from 'i18next';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { api } from '/@/renderer/api';
 import { usePlayerEvents } from '/@/renderer/features/player/audio-player/hooks/use-player-events';
@@ -9,13 +9,20 @@ import { songsQueries } from '/@/renderer/features/songs/api/songs-api';
 import {
     setTimestamp,
     useCurrentServerId,
+    usePlayerActions,
+    usePlayerHydrated,
+    usePlayerSong,
+    usePlayerStatus,
     usePlayerStore,
     useTimestampStoreBase,
 } from '/@/renderer/store';
 import { toast } from '/@/shared/components/toast/toast';
+import { PlayerStatus } from '/@/shared/types/types';
+
+let startupRestoreSessionHandled = false;
 
 export const useQueueRestoreTimestamp = () => {
-    const player = usePlayerStore();
+    const { mediaSeekToTimestamp } = usePlayerActions();
 
     usePlayerEvents(
         {
@@ -24,12 +31,120 @@ export const useQueueRestoreTimestamp = () => {
 
                 setTimeout(() => {
                     setTimestamp(position);
-                    player.mediaSeekToTimestamp(position);
+                    mediaSeekToTimestamp(position);
                 }, 100);
             },
         },
         [],
     );
+};
+
+export const QueueRestoreTimestampHook = () => {
+    useQueueRestoreTimestamp();
+    return null;
+};
+
+export const useInitialTimestampRestore = () => {
+    const { mediaSeekToTimestamp } = usePlayerActions();
+    const playerHydrated = usePlayerHydrated();
+    const currentSong = usePlayerSong();
+    const playerStatus = usePlayerStatus();
+    const timestamp = useTimestampStoreBase((state) => state.timestamp);
+
+    const startupRestoreInitializedRef = useRef(false);
+    const startupSeekArmedRef = useRef<null | number>(null);
+    const startupSeekTargetUniqueIdRef = useRef<null | string>(null);
+    const startupSeekAppliedRef = useRef(false);
+
+    const cancelStartupSeek = useCallback(() => {
+        if (startupSeekAppliedRef.current) {
+            return;
+        }
+
+        startupSeekAppliedRef.current = true;
+        startupSeekArmedRef.current = null;
+        startupSeekTargetUniqueIdRef.current = null;
+    }, []);
+
+    const applyStartupSeek = useCallback(() => {
+        const seekTimestamp = startupSeekArmedRef.current;
+
+        if (startupSeekAppliedRef.current) {
+            return;
+        }
+
+        if (!seekTimestamp || seekTimestamp <= 0) {
+            return;
+        }
+
+        const targetUniqueId = startupSeekTargetUniqueIdRef.current;
+        const currentUniqueId = usePlayerStore.getState().getCurrentSong()?._uniqueId;
+
+        if (targetUniqueId && currentUniqueId !== targetUniqueId) {
+            cancelStartupSeek();
+            return;
+        }
+
+        startupSeekAppliedRef.current = true;
+        startupSeekArmedRef.current = null;
+        startupSeekTargetUniqueIdRef.current = null;
+
+        setTimeout(() => {
+            mediaSeekToTimestamp(seekTimestamp);
+        }, 100);
+    }, [cancelStartupSeek, mediaSeekToTimestamp]);
+
+    useEffect(() => {
+        const targetUniqueId = startupSeekTargetUniqueIdRef.current;
+        if (
+            !targetUniqueId ||
+            startupSeekAppliedRef.current ||
+            !currentSong ||
+            currentSong._uniqueId === targetUniqueId
+        ) {
+            return;
+        }
+
+        cancelStartupSeek();
+    }, [cancelStartupSeek, currentSong]);
+
+    useEffect(() => {
+        if (startupRestoreInitializedRef.current || startupRestoreSessionHandled) {
+            return;
+        }
+
+        if (!playerHydrated || !currentSong) {
+            return;
+        }
+
+        startupRestoreInitializedRef.current = true;
+        startupRestoreSessionHandled = true;
+
+        if (timestamp > 0) {
+            startupSeekArmedRef.current = timestamp;
+            startupSeekTargetUniqueIdRef.current = currentSong._uniqueId;
+        }
+
+        if (playerStatus === PlayerStatus.PLAYING) {
+            applyStartupSeek();
+        }
+    }, [applyStartupSeek, currentSong, playerHydrated, playerStatus, timestamp]);
+
+    usePlayerEvents(
+        {
+            onPlayerStatus: (properties) => {
+                if (properties.status === PlayerStatus.PLAYING) {
+                    applyStartupSeek();
+                }
+            },
+        },
+        [applyStartupSeek],
+    );
+};
+
+export const InitialTimestampRestoreHook = () => {
+    useInitialTimestampRestore();
+    return null;
 };
 
 export const useSaveQueue = () => {
@@ -38,62 +153,35 @@ export const useSaveQueue = () => {
     const mutation = useMutation({
         mutationFn: async () => {
             if (!serverId) {
-                throw new Error(t('error.serverRequired', { postProcess: 'sentenceCase' }));
+                throw new Error(t('error.serverRequired'));
             }
 
-            const { player, queue } = usePlayerStore.getState();
-            let uniqueIds: string[] = [];
+            const state = usePlayerStore.getState();
+            const queue = state.getQueue();
 
-            if (queue.shuffled.length > 0) {
-                for (const shuffledIndex of queue.shuffled) {
-                    uniqueIds.push(queue.default[shuffledIndex]);
-                }
-            } else {
-                uniqueIds = queue.default;
-            }
-
-            const songs: string[] = [];
-
-            if (uniqueIds.length > 0) {
-                for (const song of uniqueIds) {
-                    if (queue.songs[song]._serverId !== serverId) {
-                        toast.error({
-                            message: t('error.multipleServerSaveQueueError', {
-                                postProcess: 'sentenceCase',
-                            }),
-                            title: t('error.genericError', { postProcess: 'sentenceCase' }),
-                        });
-
-                        throw new Error(
-                            `${t('error.multipleServerSaveQueueError', { postProcess: 'sentenceCase' })}`,
-                        );
-                    }
-
-                    songs?.push(queue.songs[song].id);
-                }
-            }
-
-            try {
-                await api.controller.savePlayQueue({
-                    apiClientProps: { serverId },
-                    query: {
-                        currentIndex: queue.default.length > 0 ? player.index : undefined,
-                        positionMs: useTimestampStoreBase.getState().timestamp * 1000,
-                        songs,
-                    },
-                });
-
-                toast.success({
-                    message: '',
-                    title: t('form.saveQueue.success', { postProcess: 'sentenceCase' }),
-                });
-            } catch (error) {
+            if (queue.items.some((item) => item._serverId !== serverId)) {
                 toast.error({
-                    message: (error as Error).message,
-                    title: t('error.saveQueueFailed', { postProcess: 'sentenceCase' }),
+                    message: t('error.multipleServerSaveQueueError'),
+                    title: t('error.genericError'),
                 });
-                throw error;
+
+                throw new Error(`${t('error.multipleServerSaveQueueError')}`);
             }
+
+            return api.controller.savePlayQueue({
+                apiClientProps: { serverId },
+                query: {
+                    currentIndex: queue.items.length > 0 ? state.player.index : undefined,
+                    positionMs: useTimestampStoreBase.getState().timestamp * 1000,
+                    songs: queue.items.map((item) => item.id),
+                },
+            });
+        },
+        onError: (error) => {
+            toast.error({
+                message: (error as Error).message,
+                title: t('error.saveQueueFailed'),
+            });
         },
     });
 
@@ -123,7 +211,7 @@ export const useRestoreQueue = () => {
         } catch (error) {
             toast.error({
                 message: (error as Error).message,
-                title: t('error.genericError', { postProcess: 'sentenceCase' }),
+                title: t('error.genericError'),
             });
         }
     }, [player, queryClient, serverId]);

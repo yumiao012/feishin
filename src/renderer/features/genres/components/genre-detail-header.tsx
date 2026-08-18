@@ -23,14 +23,14 @@ export const GenreDetailHeader = ({ title }: GenreDetailHeaderProps) => {
     const { t } = useTranslation();
 
     const { itemCount } = useListContext();
-    const pageTitle = title || t('page.genreList.title', { postProcess: 'titleCase' });
+    const pageTitle = title || t('page.genreList.title');
 
     const genreTarget = useGenreTarget();
 
     return (
         <Stack gap={0}>
             <PageHeader>
-                <LibraryHeaderBar>
+                <LibraryHeaderBar ignoreMaxWidth>
                     <PlayButton />
                     <LibraryHeaderBar.Title>{pageTitle}</LibraryHeaderBar.Title>
                     <LibraryHeaderBar.Badge isLoading={!itemCount}>

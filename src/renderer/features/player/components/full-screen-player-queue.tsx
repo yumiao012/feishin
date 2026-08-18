@@ -8,17 +8,23 @@ import styles from './full-screen-player-queue.module.css';
 import { Lyrics } from '/@/renderer/features/lyrics/lyrics';
 import { PlayQueue } from '/@/renderer/features/now-playing/components/play-queue';
 import { FullScreenSimilarSongs } from '/@/renderer/features/player/components/full-screen-similar-songs';
-import { usePlaybackSettings } from '/@/renderer/store';
+import { usePlaybackSettings, useSettingsStore } from '/@/renderer/store';
 import {
     useFullScreenPlayerStore,
     useFullScreenPlayerStoreActions,
 } from '/@/renderer/store/full-screen-player.store';
 import { Button } from '/@/shared/components/button/button';
 import { Group } from '/@/shared/components/group/group';
-import { ItemListKey, PlayerType } from '/@/shared/types/types';
+import { ItemListKey } from '/@/shared/types/types';
 
-const Visualizer = lazy(() =>
-    import('/@/renderer/features/player/components/visualizer').then((module) => ({
+const AudioMotionAnalyzerVisualizer = lazy(() =>
+    import('../../visualizer/components/audiomotionanalyzer/visualizer').then((module) => ({
+        default: module.Visualizer,
+    })),
+);
+
+const ButterchurnVisualizer = lazy(() =>
+    import('../../visualizer/components/butternchurn/visualizer').then((module) => ({
         default: module.Visualizer,
     })),
 );
@@ -27,7 +33,8 @@ export const FullScreenPlayerQueue = () => {
     const { t } = useTranslation();
     const { activeTab, opacity } = useFullScreenPlayerStore();
     const { setStore } = useFullScreenPlayerStoreActions();
-    const { type, webAudio } = usePlaybackSettings();
+    const { webAudio } = usePlaybackSettings();
+    const visualizerType = useSettingsStore((store) => store.visualizer.type);
 
     const headerItems = useMemo(() => {
         const items = [
@@ -48,16 +55,16 @@ export const FullScreenPlayerQueue = () => {
             },
         ];
 
-        if (type === PlayerType.WEB && webAudio) {
+        if (webAudio) {
             items.push({
                 active: activeTab === 'visualizer',
-                label: t('page.fullscreenPlayer.visualizer', { postProcess: 'titleCase' }),
+                label: t('page.fullscreenPlayer.visualizer'),
                 onClick: () => setStore({ activeTab: 'visualizer' }),
             });
         }
 
         return items;
-    }, [activeTab, setStore, t, type, webAudio]);
+    }, [activeTab, setStore, t, webAudio]);
 
     return (
         <div
@@ -74,6 +81,7 @@ export const FullScreenPlayerQueue = () => {
                 gap={0}
                 grow
                 justify="center"
+                pb="md"
             >
                 {headerItems.map((item) => (
                     <div className={styles.headerItemWrapper} key={`tab-${item.label}`}>
@@ -84,7 +92,7 @@ export const FullScreenPlayerQueue = () => {
                             pos="relative"
                             size="lg"
                             uppercase
-                            variant="subtle"
+                            variant="transparent"
                         >
                             {item.label}
                         </Button>
@@ -99,17 +107,25 @@ export const FullScreenPlayerQueue = () => {
             </Group>
             {activeTab === 'queue' ? (
                 <div className={styles.queueContainer}>
-                    <PlayQueue listKey={ItemListKey.FULL_SCREEN} searchTerm={undefined} />
+                    <PlayQueue
+                        enableScrollShadow={false}
+                        listKey={ItemListKey.FULL_SCREEN}
+                        searchTerm={undefined}
+                    />
                 </div>
             ) : activeTab === 'related' ? (
                 <div className={styles.queueContainer}>
                     <FullScreenSimilarSongs />
                 </div>
             ) : activeTab === 'lyrics' ? (
-                <Lyrics />
-            ) : activeTab === 'visualizer' && type === PlayerType.WEB && webAudio ? (
+                <Lyrics fadeOutNoLyricsMessage={false} />
+            ) : activeTab === 'visualizer' && webAudio ? (
                 <Suspense fallback={<></>}>
-                    <Visualizer />
+                    {visualizerType === 'butterchurn' ? (
+                        <ButterchurnVisualizer />
+                    ) : (
+                        <AudioMotionAnalyzerVisualizer />
+                    )}
                 </Suspense>
             ) : null}
         </div>

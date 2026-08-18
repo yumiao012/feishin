@@ -2,7 +2,7 @@ import type { ButtonVariant, ButtonProps as MantineButtonProps } from '@mantine/
 
 import { ElementProps, Button as MantineButton } from '@mantine/core';
 import clsx from 'clsx';
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import styles from './button.module.css';
 
@@ -11,7 +11,8 @@ import { useTimeout } from '/@/shared/hooks/use-timeout';
 import { createPolymorphicComponent } from '/@/shared/utils/create-polymorphic-component';
 
 export interface ButtonProps
-    extends ElementProps<'button', keyof MantineButtonProps>,
+    extends
+        ElementProps<'button', keyof MantineButtonProps>,
         MantineButtonProps,
         MantineButtonProps {
     tooltip?: Omit<TooltipProps, 'children'>;
@@ -41,21 +42,26 @@ export const _Button = forwardRef<HTMLButtonElement, ButtonProps>(
         }: ButtonProps,
         ref,
     ) => {
+        const memoizedClassNames = useMemo(
+            () => ({
+                inner: styles.inner,
+                label: clsx(styles.label, {
+                    [styles.uppercase]: uppercase,
+                }),
+                loader: styles.loader,
+                root: styles.root,
+                section: styles.section,
+                ...classNames,
+            }),
+            [classNames, uppercase],
+        );
+
         if (tooltip) {
             return (
                 <Tooltip withinPortal {...tooltip}>
                     <MantineButton
                         autoContrast
-                        classNames={{
-                            inner: styles.inner,
-                            label: clsx(styles.label, {
-                                [styles.uppercase]: uppercase,
-                            }),
-                            loader: styles.loader,
-                            root: styles.root,
-                            section: styles.section,
-                            ...classNames,
-                        }}
+                        classNames={memoizedClassNames}
                         loading={loading}
                         ref={ref}
                         size={size}
@@ -71,16 +77,7 @@ export const _Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
         return (
             <MantineButton
-                classNames={{
-                    inner: styles.inner,
-                    label: clsx(styles.label, {
-                        [styles.uppercase]: uppercase,
-                    }),
-                    loader: styles.loader,
-                    root: styles.root,
-                    section: styles.section,
-                    ...classNames,
-                }}
+                classNames={memoizedClassNames}
                 loading={loading}
                 ref={ref}
                 size={size}

@@ -1,10 +1,7 @@
 import clsx from 'clsx';
-import { type CSSProperties, memo } from 'react';
-import RSkeleton from 'react-loading-skeleton';
+import { type CSSProperties, memo, useEffect, useRef, useState } from 'react';
 
 import styles from './skeleton.module.css';
-
-import 'react-loading-skeleton/dist/skeleton.css';
 
 interface SkeletonProps {
     baseColor?: string;
@@ -26,31 +23,111 @@ export function BaseSkeleton({
     borderRadius,
     className,
     containerClassName,
-    count,
-    direction,
-    enableAnimation = false,
+    count = 1,
+    direction = 'ltr',
+    enableAnimation = true,
     height,
     inline,
     isCentered,
     style,
     width,
 }: SkeletonProps) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [isInViewport, setIsInViewport] = useState(false);
+    const [isDocumentVisible, setIsDocumentVisible] = useState(
+        typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+    );
+
+    useEffect(() => {
+        if (!enableAnimation || typeof document === 'undefined') {
+            return;
+        }
+
+        const handleVisibilityChange = () => {
+            setIsDocumentVisible(document.visibilityState === 'visible');
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [enableAnimation]);
+
+    useEffect(() => {
+        if (!enableAnimation) {
+            setIsInViewport(false);
+
+            return;
+        }
+
+        const element = containerRef.current;
+
+        if (!element) {
+            return;
+        }
+
+        if (typeof IntersectionObserver === 'undefined') {
+            setIsInViewport(true);
+
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const [entry] = entries;
+                setIsInViewport(Boolean(entry?.isIntersecting));
+            },
+            { threshold: 0.01 },
+        );
+
+        observer.observe(element);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [enableAnimation, count, inline, isCentered, direction]);
+
+    const shouldAnimate = enableAnimation && isDocumentVisible && isInViewport;
+
+    const skeletonStyle: CSSProperties = {
+        ...style,
+        ...(baseColor && { ['--base-color' as string]: baseColor }),
+        ...(borderRadius && { ['--skeleton-border-radius' as string]: borderRadius }),
+        ...(height !== undefined && {
+            height: typeof height === 'number' ? `${height}px` : height,
+        }),
+        ...(width !== undefined && { width: typeof width === 'number' ? `${width}px` : width }),
+    };
+
+    const containerClasses = clsx(styles.skeletonContainer, containerClassName, {
+        [styles.centered]: isCentered,
+        [styles.inline]: inline,
+        [styles.rtl]: direction === 'rtl',
+    });
+
+    const skeletonClasses = clsx(styles.skeleton, className, {
+        [styles.animated]: shouldAnimate,
+    });
+
+    if (count <= 1) {
+        return (
+            <div className={containerClasses} ref={containerRef}>
+                <div className={skeletonClasses} style={skeletonStyle} />
+            </div>
+        );
+    }
+
     return (
-        <RSkeleton
-            baseColor={baseColor}
-            borderRadius={borderRadius}
-            className={clsx(styles.skeleton, className)}
-            containerClassName={clsx(styles.skeletonContainer, containerClassName, {
-                [styles.centered]: isCentered,
-            })}
-            count={count}
-            direction={direction}
-            enableAnimation={enableAnimation}
-            height={height}
-            inline={inline}
-            style={style}
-            width={width}
-        />
+        <div
+            className={clsx(containerClasses, styles.skeletonWrapper)}
+            dir={direction}
+            ref={containerRef}
+        >
+            {Array.from({ length: count }, (_, i) => (
+                <div className={skeletonClasses} key={i} style={skeletonStyle} />
+            ))}
+        </div>
     );
 }
 

@@ -41,6 +41,7 @@ interface HeaderPlayButtonProps {
 
 interface TitleProps {
     children: ReactNode;
+    order?: number;
 }
 
 const HeaderPlayButton = ({
@@ -100,9 +101,9 @@ const HeaderPlayButton = ({
     );
 };
 
-const Title = ({ children }: TitleProps) => {
+const Title = ({ children, order = 1 }: TitleProps) => {
     return (
-        <TextTitle fw={700} order={1} overflow="hidden">
+        <TextTitle fw={700} order={order as any} overflow="hidden">
             {children}
         </TextTitle>
     );
@@ -113,7 +114,7 @@ interface HeaderBadgeProps extends BadgeProps {
 }
 
 const HeaderBadge = ({ children, isLoading, ...props }: HeaderBadgeProps) => {
-    return <Badge {...props}>{isLoading ? <Spinner /> : children}</Badge>;
+    return <Badge {...props}>{isLoading ? <Spinner container size="sm" /> : children}</Badge>;
 };
 
 export const LibraryHeaderBar = Object.assign(memo(LibraryHeaderBarComponent), {

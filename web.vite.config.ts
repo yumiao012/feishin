@@ -1,8 +1,10 @@
-import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, normalizePath } from 'vite';
 import { ViteEjsPlugin } from 'vite-plugin-ejs';
 import { VitePWA } from 'vite-plugin-pwa';
+
+import { kuromojiDictionaryPlugin } from './vite.kuromoji-plugin';
+import { createReactPlugin } from './vite.react-plugin';
 
 export default defineConfig({
     base: './',
@@ -24,13 +26,32 @@ export default defineConfig({
                 ),
             },
             output: {
-                assetFileNames: 'assets/[name].[ext]',
+                assetFileNames: (assetInfo) => {
+                    const stableNames = [
+                        '32x32.png',
+                        '64x64.png',
+                        '128x128.png',
+                        '256x256.png',
+                        '512x512.png',
+                        '1024x1024.png',
+                        'favicon.ico',
+                        'preview_full_screen_player.webp',
+                    ];
+
+                    if (assetInfo.names.length === 1 && stableNames.includes(assetInfo.names[0])) {
+                        return 'assets/[name][extname]';
+                    }
+
+                    return 'assets/[name]-[hash][extname]';
+                },
+                sourcemapExcludeSources: false,
             },
         },
         sourcemap: true,
     },
     css: {
         modules: {
+            generateScopedName: 'fs-[name]-[local]',
             localsConvention: 'camelCase',
         },
     },
@@ -39,12 +60,13 @@ export default defineConfig({
             '@atlaskit/pragmatic-drag-and-drop',
             '@atlaskit/pragmatic-drag-and-drop-auto-scroll',
             '@atlaskit/pragmatic-drag-and-drop-hitbox',
-            '@tanstack_react-query-persist-client',
+            '@tanstack/react-query-persist-client',
             'idb-keyval',
         ],
     },
     plugins: [
-        react(),
+        createReactPlugin(),
+        kuromojiDictionaryPlugin(),
         ViteEjsPlugin({
             root: normalizePath(path.resolve(__dirname, './src/renderer')),
             web: true,
@@ -112,16 +134,25 @@ export default defineConfig({
             registerType: 'autoUpdate',
             scope: '/assets/',
             workbox: {
+                cleanupOutdatedCaches: true,
+                clientsClaim: true,
+                globIgnores: ['**/kuromoji/**'],
                 maximumFileSizeToCacheInBytes: 1000000 * 5, // 5 MB
+                skipWaiting: true,
             },
         }),
     ],
     resolve: {
         alias: {
             '/@/i18n': path.resolve(__dirname, './src/i18n'),
+            '/@/lyrics-conversion-api': path.resolve(
+                __dirname,
+                './src/main/features/core/lyrics/furigana.ts',
+            ),
             '/@/remote': path.resolve(__dirname, './src/remote'),
             '/@/renderer': path.resolve(__dirname, './src/renderer'),
             '/@/shared': path.resolve(__dirname, './src/shared'),
+            path: path.resolve(__dirname, './src/renderer/shims/path.ts'),
         },
     },
     root: path.resolve(__dirname, './src/renderer'),

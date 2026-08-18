@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import i18n from '/@/i18n/i18n';
+import { normalizeLyrics } from '/@/renderer/features/lyrics/api/lyrics-utils';
 import { Button } from '/@/shared/components/button/button';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { Code } from '/@/shared/components/code/code';
@@ -31,11 +32,17 @@ export const LyricsExportForm = ({ lyrics, offsetMs, synced }: LyricsExportFormP
     });
 
     const displayedLyrics = useMemo(() => {
-        if (form.values.synced && Array.isArray(lyrics.lyrics)) {
-            const contents = lyrics.lyrics
+        if (Array.isArray(lyrics.lyrics)) {
+            const normalizedLyrics = normalizeLyrics(lyrics.lyrics);
+
+            if (!form.values.synced) {
+                return normalizedLyrics.map((lyric) => lyric.text).join('\n') + '\n';
+            }
+
+            const contents = normalizedLyrics
                 .map(
                     (lyric) =>
-                        `[${formatDuration(lyric[0], { leading: true, ms: true })}]${lyric[1]}`,
+                        `[${formatDuration(lyric.startMs, { leading: true, ms: true })}]${lyric.text}`,
                 )
                 .join('\n');
 
@@ -44,12 +51,9 @@ export const LyricsExportForm = ({ lyrics, offsetMs, synced }: LyricsExportFormP
 [offset:${form.values.offsetMs + (lyrics.offsetMs ?? 0)}]
 ${contents}
 `;
-        } else {
-            if (Array.isArray(lyrics.lyrics)) {
-                return lyrics.lyrics.map((lyric) => lyric[1]).join('\n') + '\n';
-            }
-            return lyrics.lyrics;
         }
+
+        return lyrics.lyrics;
     }, [
         form.values.offsetMs,
         form.values.synced,
@@ -85,7 +89,6 @@ ${contents}
                             data-autofocus
                             label={t('form.lyricsExport.input', {
                                 context: 'synced',
-                                postProcess: 'titleCase',
                             })}
                             {...form.getInputProps('synced', { type: 'checkbox' })}
                         />
@@ -93,7 +96,6 @@ ${contents}
                             data-autofocus
                             label={t('form.lyricsExport.input', {
                                 context: 'offset',
-                                postProcess: 'titleCase',
                             })}
                             {...form.getInputProps('offsetMs')}
                         />
@@ -104,10 +106,10 @@ ${contents}
             <Divider />
             <Group justify="flex-end">
                 <Button onClick={() => closeAllModals()} variant="default">
-                    {t('common.close', { postProcess: 'titleCase' })}
+                    {t('common.close')}
                 </Button>
                 <Button onClick={exportLyrics} variant="filled">
-                    {t('form.lyricsExport.export', { postProcess: 'titleCase' })}
+                    {t('form.lyricsExport.export')}
                 </Button>
             </Group>
         </Stack>
@@ -123,6 +125,6 @@ export const openLyricsExportModal = ({ lyrics, offsetMs, synced }: LyricsExport
                 height: '600px',
             },
         },
-        title: i18n.t('form.lyricSearch.title', { postProcess: 'titleCase' }) as string,
+        title: i18n.t('form.lyricSearch.title') as string,
     });
 };

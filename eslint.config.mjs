@@ -6,7 +6,7 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks';
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh';
 
 export default tseslint.config(
-    { ignores: ['**/node_modules', '**/dist', '**/out'] },
+    { ignores: ['**/node_modules', '**/dist', '**/out', 'commitlint.config.mjs'] },
     tseslint.configs.recommended,
     perfectionist.configs['recommended-natural'],
     eslintPluginReact.configs.flat.recommended,
@@ -25,7 +25,7 @@ export default tseslint.config(
             'react-refresh': eslintPluginReactRefresh,
         },
         rules: {
-            ...eslintPluginReactHooks.configs.recommended.rules,
+            ...eslintPluginReactHooks.configs['recommended-latest'].rules,
             ...eslintPluginReactRefresh.configs.vite.rules,
             '@typescript-eslint/explicit-function-return-type': 'off',
             '@typescript-eslint/no-duplicate-enum-values': 'off',

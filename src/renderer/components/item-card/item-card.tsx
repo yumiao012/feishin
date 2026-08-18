@@ -1,11 +1,11 @@
 import clsx from 'clsx';
-import formatDuration from 'format-duration';
 import { AnimatePresence } from 'motion/react';
-import { Fragment, memo, ReactNode, useState } from 'react';
+import { Fragment, memo, ReactNode, useCallback, useMemo, useState } from 'react';
 import { generatePath, Link } from 'react-router';
 
 import styles from './item-card.module.css';
 
+import i18n from '/@/i18n/i18n';
 import { ItemCardControls } from '/@/renderer/components/item-card/item-card-controls';
 import { ItemImage } from '/@/renderer/components/item-image/item-image';
 import { getDraggedItems } from '/@/renderer/components/item-list/helpers/get-dragged-items';
@@ -16,9 +16,21 @@ import {
     useItemSelectionState,
 } from '/@/renderer/components/item-list/helpers/item-list-state';
 import { ItemControls } from '/@/renderer/components/item-list/types';
+import { JoinedArtists } from '/@/renderer/features/albums/components/joined-artists';
 import { useDragDrop } from '/@/renderer/hooks/use-drag-drop';
 import { AppRoute } from '/@/renderer/router/routes';
-import { formatDateAbsolute, formatDateRelative, formatRating } from '/@/renderer/utils/format';
+import { useShowFavorites, useShowRatings } from '/@/renderer/store';
+import {
+    formatDateAbsolute,
+    formatDateRelative,
+    formatDurationString,
+    formatPartialIsoDateUTC,
+    formatRating,
+} from '/@/renderer/utils/format';
+import { SEPARATOR_STRING } from '/@/shared/api/utils';
+import { ExplicitIndicator } from '/@/shared/components/explicit-indicator/explicit-indicator';
+import { Group } from '/@/shared/components/group/group';
+import { Icon } from '/@/shared/components/icon/icon';
 import { Separator } from '/@/shared/components/separator/separator';
 import { Skeleton } from '/@/shared/components/skeleton/skeleton';
 import { Text } from '/@/shared/components/text/text';
@@ -27,25 +39,32 @@ import {
     Album,
     AlbumArtist,
     Artist,
+    Genre,
     LibraryItem,
     Playlist,
     Song,
 } from '/@/shared/types/domain-types';
 import { DragOperation, DragTarget } from '/@/shared/types/drag-and-drop';
+import { stringToColor } from '/@/shared/utils/string-to-color';
 
 export type DataRow = {
     align?: 'center' | 'end' | 'start';
-    format: (data: Album | AlbumArtist | Artist | Playlist | Song) => null | ReactNode | string;
+    format: (
+        data: Album | AlbumArtist | Artist | Genre | Playlist | Song,
+    ) => null | ReactNode | string;
     id: string;
     isMuted?: boolean;
 };
 
 export interface ItemCardProps {
     controls?: ItemControls;
-    data: Album | AlbumArtist | Artist | Playlist | Song | undefined;
+    data: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined;
     enableDrag?: boolean;
     enableExpansion?: boolean;
+    enableMultiSelect?: boolean;
     enableNavigation?: boolean;
+    imageAsLink?: boolean;
+    imageFetchPriority?: 'auto' | 'high' | 'low';
     internalState?: ItemListStateActions;
     isRound?: boolean;
     itemType: LibraryItem;
@@ -59,7 +78,10 @@ export const ItemCard = ({
     data,
     enableDrag,
     enableExpansion,
+    enableMultiSelect,
     enableNavigation = true,
+    imageAsLink,
+    imageFetchPriority,
     internalState,
     isRound,
     itemType,
@@ -67,56 +89,72 @@ export const ItemCard = ({
     type = 'poster',
     withControls,
 }: ItemCardProps) => {
+    const showRatings = useShowRatings();
+    const showFavorites = useShowFavorites();
     const imageUrl = getImageUrl(data);
     const rows = providedRows || [];
 
     switch (type) {
         case 'compact':
             return (
-                <CompactItemCard
+                <MemoizedCompactItemCard
                     controls={controls}
                     data={data}
                     enableDrag={enableDrag}
                     enableExpansion={enableExpansion}
+                    enableMultiSelect={enableMultiSelect}
                     enableNavigation={enableNavigation}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
                     imageUrl={imageUrl}
                     internalState={internalState}
                     isRound={isRound}
                     itemType={itemType}
                     rows={rows}
+                    showFavorite={showFavorites}
+                    showRating={showRatings}
                     withControls={withControls}
                 />
             );
         case 'poster':
             return (
-                <PosterItemCard
+                <MemoizedPosterItemCard
                     controls={controls}
                     data={data}
                     enableDrag={enableDrag}
                     enableExpansion={enableExpansion}
+                    enableMultiSelect={enableMultiSelect}
                     enableNavigation={enableNavigation}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
                     imageUrl={imageUrl}
                     internalState={internalState}
                     isRound={isRound}
                     itemType={itemType}
                     rows={rows}
+                    showFavorite={showFavorites}
+                    showRating={showRatings}
                     withControls={withControls}
                 />
             );
         case 'default':
         default:
             return (
-                <DefaultItemCard
+                <MemoizedDefaultItemCard
                     controls={controls}
                     data={data}
                     enableDrag={enableDrag}
                     enableExpansion={enableExpansion}
                     enableNavigation={enableNavigation}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
                     imageUrl={imageUrl}
                     internalState={internalState}
                     isRound={isRound}
                     itemType={itemType}
                     rows={rows}
+                    showFavorite={showFavorites}
+                    showRating={showRatings}
                     withControls={withControls}
                 />
             );
@@ -127,70 +165,388 @@ export interface ItemCardDerivativeProps extends Omit<ItemCardProps, 'type'> {
     controls?: ItemControls;
     enableExpansion?: boolean;
     enableNavigation?: boolean;
+    imageAsLink?: boolean;
+    imageFetchPriority?: 'auto' | 'high' | 'low';
     imageUrl: string | undefined;
     internalState?: ItemListStateActions;
     rows: DataRow[];
+    showFavorite: boolean;
+    showRating: boolean;
 }
+
+type ItemCardData = NonNullable<ItemCardProps['data']>;
+
+const ItemCardStandardImageArea = memo(function ItemCardStandardImageArea({
+    controls,
+    data,
+    enableExpansion,
+    enableImageViewport = true,
+    enableNavigation,
+    handleContextMenu,
+    handleImageClick,
+    handleLinkDragStart,
+    imageAsLink,
+    imageFetchPriority,
+    internalState,
+    isRound,
+    itemType,
+    navigationPath,
+    showFavorite,
+    showRating,
+    variant,
+    withControls,
+}: {
+    controls?: ItemControls;
+    data: ItemCardData;
+    enableExpansion?: boolean;
+    enableImageViewport?: boolean;
+    enableNavigation?: boolean;
+    handleContextMenu: (e: React.MouseEvent<HTMLElement>) => void;
+    handleImageClick: (e: React.MouseEvent<HTMLElement>) => void;
+    handleLinkDragStart: (e: React.DragEvent<HTMLAnchorElement>) => void;
+    imageAsLink?: boolean;
+    imageFetchPriority?: 'auto' | 'high' | 'low';
+    internalState?: ItemListStateActions;
+    isRound?: boolean;
+    itemType: LibraryItem;
+    navigationPath: null | string;
+    showFavorite: boolean;
+    showRating: boolean;
+    variant: 'default' | 'poster';
+    withControls?: boolean;
+}) {
+    const [showControls, setShowControls] = useState(false);
+
+    const handleMouseEnter = () => {
+        if (withControls) {
+            setShowControls(true);
+        }
+    };
+
+    const handleMouseLeave = () => {
+        if (withControls) {
+            setShowControls(false);
+        }
+    };
+
+    const imageContainerClassName = clsx(styles.imageContainer, {
+        [styles.isRound]: isRound,
+    });
+
+    const isFavorite = 'userFavorite' in data && (data as { userFavorite: boolean }).userFavorite;
+    const userRating =
+        'userRating' in data &&
+        typeof (data as { userRating: null | number }).userRating === 'number'
+            ? (data as { userRating: null | number }).userRating
+            : null;
+    const hasRating = showRating && userRating !== null && userRating > 0;
+
+    const imageContainerContent = (
+        <>
+            {itemType === LibraryItem.GENRE &&
+            data &&
+            'name' in data &&
+            typeof (data as Genre).name === 'string' ? (
+                <GenreImagePlaceholder
+                    className={clsx(styles.image, styles.genrePlaceholder, {
+                        [styles.isRound]: isRound,
+                    })}
+                    name={(data as Genre).name}
+                />
+            ) : (
+                <ItemImage
+                    className={clsx(styles.image, { [styles.isRound]: isRound })}
+                    enableDebounce={false}
+                    {...(variant === 'poster' ? { enableViewport: enableImageViewport } : {})}
+                    explicitStatus={'explicitStatus' in data && data ? data.explicitStatus : null}
+                    fetchPriority={imageFetchPriority}
+                    id={(data as { imageId?: string })?.imageId}
+                    itemType={itemType}
+                    src={(data as { imageUrl?: string })?.imageUrl}
+                    type="itemCard"
+                />
+            )}
+            {showFavorite && isFavorite && <div className={styles.favoriteBadge} />}
+            {hasRating && <div className={styles.ratingBadge}>{userRating}</div>}
+            <AnimatePresence>
+                {withControls && showControls && (
+                    <ItemCardControls
+                        controls={controls}
+                        enableExpansion={enableExpansion}
+                        {...(variant === 'poster' ? { internalState } : {})}
+                        item={data}
+                        itemType={itemType}
+                        showFavorite={showFavorite}
+                        showRating={showRating}
+                        type={variant}
+                    />
+                )}
+            </AnimatePresence>
+        </>
+    );
+
+    return enableNavigation && navigationPath && (imageAsLink ?? !internalState) ? (
+        <Link
+            className={imageContainerClassName}
+            draggable={false}
+            onClick={handleImageClick}
+            onContextMenu={handleContextMenu}
+            onDragStart={handleLinkDragStart}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            state={{ item: data }}
+            to={navigationPath}
+        >
+            {imageContainerContent}
+        </Link>
+    ) : (
+        <div
+            className={imageContainerClassName}
+            onClick={handleImageClick}
+            onContextMenu={handleContextMenu}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+        >
+            {imageContainerContent}
+        </div>
+    );
+});
+
+ItemCardStandardImageArea.displayName = 'ItemCardStandardImageArea';
+
+const CompactItemCardImageArea = memo(function CompactItemCardImageArea({
+    controls,
+    data,
+    enableExpansion,
+    enableNavigation,
+    handleContextMenu,
+    handleImageClick,
+    handleLinkDragStart,
+    imageAsLink,
+    imageFetchPriority,
+    internalState,
+    isRound,
+    itemType,
+    navigationPath,
+    rows,
+    showFavorite,
+    showRating,
+    withControls,
+}: {
+    controls?: ItemControls;
+    data: ItemCardData;
+    enableExpansion?: boolean;
+    enableNavigation?: boolean;
+    handleContextMenu: (e: React.MouseEvent<HTMLElement>) => void;
+    handleImageClick: (e: React.MouseEvent<HTMLElement>) => void;
+    handleLinkDragStart: (e: React.DragEvent<HTMLAnchorElement>) => void;
+    imageAsLink?: boolean;
+    imageFetchPriority?: 'auto' | 'high' | 'low';
+    internalState?: ItemListStateActions;
+    isRound?: boolean;
+    itemType: LibraryItem;
+    navigationPath: null | string;
+    rows: DataRow[];
+    showFavorite: boolean;
+    showRating: boolean;
+    withControls?: boolean;
+}) {
+    const [showControls, setShowControls] = useState(false);
+
+    const handleMouseEnter = () => {
+        if (withControls) {
+            setShowControls(true);
+        }
+    };
+
+    const handleMouseLeave = () => {
+        if (withControls) {
+            setShowControls(false);
+        }
+    };
+
+    const imageContainerClassName = clsx(styles.imageContainer, {
+        [styles.isRound]: isRound,
+    });
+
+    const isFavorite = 'userFavorite' in data && (data as { userFavorite: boolean }).userFavorite;
+    const userRating =
+        'userRating' in data &&
+        typeof (data as { userRating: null | number }).userRating === 'number'
+            ? (data as { userRating: null | number }).userRating
+            : null;
+    const hasRating = showRating && userRating !== null && userRating > 0;
+
+    const imageContainerContent = (
+        <>
+            {itemType === LibraryItem.GENRE &&
+            data &&
+            'name' in data &&
+            typeof (data as Genre).name === 'string' ? (
+                <GenreImagePlaceholder
+                    className={clsx(styles.image, styles.genrePlaceholder, {
+                        [styles.isRound]: isRound,
+                    })}
+                    name={(data as Genre).name}
+                />
+            ) : (
+                <ItemImage
+                    className={clsx(styles.image, {
+                        [styles.isRound]: isRound,
+                    })}
+                    enableDebounce={false}
+                    explicitStatus={'explicitStatus' in data && data ? data.explicitStatus : null}
+                    fetchPriority={imageFetchPriority}
+                    id={data?.imageId}
+                    itemType={itemType}
+                    src={(data as Album | AlbumArtist | Playlist | Song)?.imageUrl}
+                    type="itemCard"
+                />
+            )}
+            {showFavorite && isFavorite && <div className={styles.favoriteBadge} />}
+            {hasRating && <div className={styles.ratingBadge}>{userRating}</div>}
+            <AnimatePresence>
+                {withControls && showControls && data && (
+                    <ItemCardControls
+                        controls={controls}
+                        enableExpansion={enableExpansion}
+                        internalState={internalState}
+                        item={data}
+                        itemType={itemType}
+                        showFavorite={showFavorite}
+                        showRating={showRating}
+                        type="compact"
+                    />
+                )}
+            </AnimatePresence>
+            <div className={clsx(styles.detailContainer, styles.compact)}>
+                {rows
+                    .filter(
+                        (row): row is NonNullable<typeof row> => row !== null && row !== undefined,
+                    )
+                    .map((row, index) => (
+                        <ItemCardRow
+                            data={data!}
+                            index={index}
+                            key={row.id}
+                            row={row}
+                            type="compact"
+                        />
+                    ))}
+            </div>
+        </>
+    );
+
+    return enableNavigation && navigationPath && (imageAsLink ?? !internalState) ? (
+        <Link
+            className={imageContainerClassName}
+            draggable={false}
+            onClick={handleImageClick}
+            onContextMenu={handleContextMenu}
+            onDragStart={handleLinkDragStart}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            state={{ item: data }}
+            to={navigationPath}
+        >
+            {imageContainerContent}
+        </Link>
+    ) : (
+        <div
+            className={imageContainerClassName}
+            onClick={handleImageClick}
+            onContextMenu={handleContextMenu}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+        >
+            {imageContainerContent}
+        </div>
+    );
+});
+
+CompactItemCardImageArea.displayName = 'CompactItemCardImageArea';
 
 const CompactItemCard = ({
     controls,
     data,
     enableDrag,
     enableExpansion,
+    enableMultiSelect,
     enableNavigation,
+    imageAsLink,
+    imageFetchPriority,
     internalState,
     isRound,
     itemType,
     rows,
+    showFavorite,
+    showRating,
     withControls,
 }: ItemCardDerivativeProps) => {
-    const [showControls, setShowControls] = useState(false);
     const itemRowId =
         data && internalState && typeof data === 'object' && 'id' in data
             ? internalState.extractRowId(data)
             : undefined;
     const isSelected = useItemSelectionState(internalState, itemRowId || undefined);
 
-    const { isDragging: isDraggingLocal, ref } = useDragDrop<HTMLDivElement>({
-        drag: {
-            getId: () => {
-                if (!data) {
-                    return [];
-                }
+    const getId = useCallback(() => {
+        if (!data) {
+            return [];
+        }
 
-                const draggedItems = getDraggedItems(data, internalState);
-                return draggedItems.map((item) => item.id);
-            },
-            getItem: () => {
-                if (!data) {
-                    return [];
-                }
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        return draggedItems.map((item) => item.id);
+    }, [data, internalState, enableMultiSelect]);
 
-                const draggedItems = getDraggedItems(data, internalState);
-                return draggedItems;
-            },
+    const getItem = useCallback(() => {
+        if (!data) {
+            return [];
+        }
+
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        return draggedItems;
+    }, [data, internalState, enableMultiSelect]);
+
+    const onDragStart = useCallback(() => {
+        if (!data) {
+            return;
+        }
+
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        if (internalState) {
+            internalState.setDragging(draggedItems);
+        }
+    }, [data, internalState, enableMultiSelect]);
+
+    const onDrop = useCallback(() => {
+        if (internalState) {
+            internalState.setDragging([]);
+        }
+    }, [internalState]);
+
+    const dragOperation = useMemo(
+        () =>
+            itemType === LibraryItem.QUEUE_SONG
+                ? [DragOperation.REORDER, DragOperation.ADD]
+                : [DragOperation.ADD],
+        [itemType],
+    );
+
+    const drag = useMemo(
+        () => ({
+            getId,
+            getItem,
             itemType,
-            onDragStart: () => {
-                if (!data) {
-                    return;
-                }
-
-                const draggedItems = getDraggedItems(data, internalState);
-                if (internalState) {
-                    internalState.setDragging(draggedItems);
-                }
-            },
-            onDrop: () => {
-                if (internalState) {
-                    internalState.setDragging([]);
-                }
-            },
-            operation:
-                itemType === LibraryItem.QUEUE_SONG
-                    ? [DragOperation.REORDER, DragOperation.ADD]
-                    : [DragOperation.ADD],
+            onDragStart,
+            onDrop,
+            operation: dragOperation,
             target: DragTarget.ALBUM,
-        },
+        }),
+        [getId, getItem, itemType, onDragStart, onDrop, dragOperation],
+    );
+
+    const { isDragging: isDraggingLocal, ref } = useDragDrop<HTMLDivElement>({
+        drag,
         isEnabled: !!enableDrag && !!data,
     });
 
@@ -238,18 +594,6 @@ const CompactItemCard = ({
     if (data) {
         const navigationPath = getItemNavigationPath(data, itemType);
 
-        const handleMouseEnter = () => {
-            if (withControls) {
-                setShowControls(true);
-            }
-        };
-
-        const handleMouseLeave = () => {
-            if (withControls) {
-                setShowControls(false);
-            }
-        };
-
         const handleContextMenu = (e: React.MouseEvent<HTMLElement>) => {
             if (!data || !controls) {
                 return;
@@ -279,61 +623,6 @@ const CompactItemCard = ({
             e.stopPropagation();
         };
 
-        const isFavorite =
-            'userFavorite' in data && (data as { userFavorite: boolean }).userFavorite;
-        const userRating =
-            'userRating' in data &&
-            typeof (data as { userRating: null | number }).userRating === 'number'
-                ? (data as { userRating: null | number }).userRating
-                : null;
-        const hasRating = userRating !== null && userRating > 0;
-
-        const imageContainerClassName = clsx(styles.imageContainer, {
-            [styles.isRound]: isRound,
-        });
-
-        const imageContainerContent = (
-            <>
-                <ItemImage
-                    className={clsx(styles.image, {
-                        [styles.isRound]: isRound,
-                    })}
-                    id={data?.id}
-                    itemType={itemType}
-                    src={(data as Album | AlbumArtist | Playlist | Song)?.imageUrl}
-                />
-                {isFavorite && <div className={styles.favoriteBadge} />}
-                {hasRating && <div className={styles.ratingBadge}>{userRating}</div>}
-                <AnimatePresence>
-                    {withControls && showControls && (
-                        <ItemCardControls
-                            controls={controls}
-                            enableExpansion={enableExpansion}
-                            item={data}
-                            itemType={itemType}
-                            type="compact"
-                        />
-                    )}
-                </AnimatePresence>
-                <div className={clsx(styles.detailContainer, styles.compact)}>
-                    {rows
-                        .filter(
-                            (row): row is NonNullable<typeof row> =>
-                                row !== null && row !== undefined,
-                        )
-                        .map((row, index) => (
-                            <ItemCardRow
-                                data={data!}
-                                index={index}
-                                key={row.id}
-                                row={row}
-                                type="compact"
-                            />
-                        ))}
-                </div>
-            </>
-        );
-
         return (
             <div
                 className={clsx(styles.container, styles.compact, {
@@ -342,31 +631,25 @@ const CompactItemCard = ({
                 })}
                 ref={ref}
             >
-                {enableNavigation && navigationPath && !internalState ? (
-                    <Link
-                        className={imageContainerClassName}
-                        draggable={false}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onDragStart={handleLinkDragStart}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                        state={{ item: data }}
-                        to={navigationPath}
-                    >
-                        {imageContainerContent}
-                    </Link>
-                ) : (
-                    <div
-                        className={imageContainerClassName}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                    >
-                        {imageContainerContent}
-                    </div>
-                )}
+                <CompactItemCardImageArea
+                    controls={controls}
+                    data={data}
+                    enableExpansion={enableExpansion}
+                    enableNavigation={enableNavigation}
+                    handleContextMenu={handleContextMenu}
+                    handleImageClick={handleImageClick}
+                    handleLinkDragStart={handleLinkDragStart}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
+                    internalState={internalState}
+                    isRound={isRound}
+                    itemType={itemType}
+                    navigationPath={navigationPath}
+                    rows={rows}
+                    showFavorite={showFavorite}
+                    showRating={showRating}
+                    withControls={withControls}
+                />
             </div>
         );
     }
@@ -382,14 +665,15 @@ const CompactItemCard = ({
                                 row !== null && row !== undefined,
                         )
                         .map((row, index) => (
-                            <div
+                            <Text
                                 className={clsx(styles.row, {
                                     [styles.muted]: index > 0,
                                 })}
                                 key={row.id}
+                                size={index > 0 ? 'sm' : 'md'}
                             >
                                 &nbsp;
-                            </div>
+                            </Text>
                         ))}
                 </div>
             </div>
@@ -402,13 +686,16 @@ const DefaultItemCard = ({
     data,
     enableExpansion,
     enableNavigation,
+    imageAsLink,
+    imageFetchPriority,
     internalState,
     isRound,
     itemType,
     rows,
+    showFavorite,
+    showRating,
     withControls,
 }: ItemCardDerivativeProps) => {
-    const [showControls, setShowControls] = useState(false);
     const itemRowId =
         data && internalState && typeof data === 'object' && 'id' in data
             ? internalState.extractRowId(data)
@@ -455,18 +742,6 @@ const DefaultItemCard = ({
     if (data) {
         const navigationPath = getItemNavigationPath(data, itemType);
 
-        const handleMouseEnter = () => {
-            if (withControls) {
-                setShowControls(true);
-            }
-        };
-
-        const handleMouseLeave = () => {
-            if (withControls) {
-                setShowControls(false);
-            }
-        };
-
         const handleContextMenu = (e: React.MouseEvent<HTMLElement>) => {
             if (!data || !controls) {
                 return;
@@ -496,74 +771,31 @@ const DefaultItemCard = ({
             e.stopPropagation();
         };
 
-        const imageContainerClassName = clsx(styles.imageContainer, {
-            [styles.isRound]: isRound,
-        });
-
-        const isFavorite =
-            'userFavorite' in data && (data as { userFavorite: boolean }).userFavorite;
-        const userRating =
-            'userRating' in data &&
-            typeof (data as { userRating: null | number }).userRating === 'number'
-                ? (data as { userRating: null | number }).userRating
-                : null;
-        const hasRating = userRating !== null && userRating > 0;
-
-        const imageContainerContent = (
-            <>
-                <ItemImage
-                    className={clsx(styles.image, { [styles.isRound]: isRound })}
-                    id={data?.id}
-                    itemType={itemType}
-                    src={(data as Album | AlbumArtist | Playlist | Song)?.imageUrl}
-                />
-                {isFavorite && <div className={styles.favoriteBadge} />}
-                {hasRating && <div className={styles.ratingBadge}>{userRating}</div>}
-                <AnimatePresence>
-                    {withControls && showControls && (
-                        <ItemCardControls
-                            controls={controls}
-                            enableExpansion={enableExpansion}
-                            item={data}
-                            itemType={itemType}
-                            type="default"
-                        />
-                    )}
-                </AnimatePresence>
-            </>
-        );
-
         return (
             <div
                 className={clsx(styles.container, {
                     [styles.selected]: isSelected,
                 })}
             >
-                {enableNavigation && navigationPath && !internalState ? (
-                    <Link
-                        className={imageContainerClassName}
-                        draggable={false}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onDragStart={handleLinkDragStart}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                        state={{ item: data }}
-                        to={navigationPath}
-                    >
-                        {imageContainerContent}
-                    </Link>
-                ) : (
-                    <div
-                        className={imageContainerClassName}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                    >
-                        {imageContainerContent}
-                    </div>
-                )}
+                <ItemCardStandardImageArea
+                    controls={controls}
+                    data={data}
+                    enableExpansion={enableExpansion}
+                    enableNavigation={enableNavigation}
+                    handleContextMenu={handleContextMenu}
+                    handleImageClick={handleImageClick}
+                    handleLinkDragStart={handleLinkDragStart}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
+                    internalState={internalState}
+                    isRound={isRound}
+                    itemType={itemType}
+                    navigationPath={navigationPath}
+                    showFavorite={showFavorite}
+                    showRating={showRating}
+                    variant="default"
+                    withControls={withControls}
+                />
                 <div className={styles.detailContainer}>
                     {rows
                         .filter(
@@ -595,14 +827,15 @@ const DefaultItemCard = ({
                         (row): row is NonNullable<typeof row> => row !== null && row !== undefined,
                     )
                     .map((row, index) => (
-                        <div
+                        <Text
                             className={clsx(styles.row, {
                                 [styles.muted]: index > 0,
                             })}
                             key={row.id}
+                            size={index > 0 ? 'sm' : 'md'}
                         >
                             &nbsp;
-                        </div>
+                        </Text>
                     ))}
             </div>
         </div>
@@ -614,60 +847,82 @@ const PosterItemCard = ({
     data,
     enableDrag,
     enableExpansion,
+    enableMultiSelect,
     enableNavigation,
+    imageAsLink,
+    imageFetchPriority,
     internalState,
     isRound,
     itemType,
     rows,
+    showFavorite,
+    showRating,
     withControls,
 }: ItemCardDerivativeProps) => {
-    const [showControls, setShowControls] = useState(false);
     const itemRowId =
         data && internalState && typeof data === 'object' && 'id' in data
             ? internalState.extractRowId(data)
             : undefined;
     const isSelected = useItemSelectionState(internalState, itemRowId || undefined);
 
-    const { isDragging: isDraggingLocal, ref } = useDragDrop<HTMLDivElement>({
-        drag: {
-            getId: () => {
-                if (!data) {
-                    return [];
-                }
+    const getId = useCallback(() => {
+        if (!data) {
+            return [];
+        }
 
-                const draggedItems = getDraggedItems(data, internalState);
-                return draggedItems.map((item) => item.id);
-            },
-            getItem: () => {
-                if (!data) {
-                    return [];
-                }
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        return draggedItems.map((item) => item.id);
+    }, [data, internalState, enableMultiSelect]);
 
-                const draggedItems = getDraggedItems(data, internalState);
-                return draggedItems;
-            },
+    const getItem = useCallback(() => {
+        if (!data) {
+            return [];
+        }
+
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        return draggedItems;
+    }, [data, internalState, enableMultiSelect]);
+
+    const onDragStart = useCallback(() => {
+        if (!data) {
+            return;
+        }
+
+        const draggedItems = getDraggedItems(data, internalState, enableMultiSelect !== false);
+        if (internalState) {
+            internalState.setDragging(draggedItems);
+        }
+    }, [data, internalState, enableMultiSelect]);
+
+    const onDrop = useCallback(() => {
+        if (internalState) {
+            internalState.setDragging([]);
+        }
+    }, [internalState]);
+
+    const dragOperation = useMemo(
+        () =>
+            itemType === LibraryItem.QUEUE_SONG
+                ? [DragOperation.REORDER, DragOperation.ADD]
+                : [DragOperation.ADD],
+        [itemType],
+    );
+
+    const drag = useMemo(
+        () => ({
+            getId,
+            getItem,
             itemType,
-            onDragStart: () => {
-                if (!data) {
-                    return;
-                }
-
-                const draggedItems = getDraggedItems(data, internalState);
-                if (internalState) {
-                    internalState.setDragging(draggedItems);
-                }
-            },
-            onDrop: () => {
-                if (internalState) {
-                    internalState.setDragging([]);
-                }
-            },
-            operation:
-                itemType === LibraryItem.QUEUE_SONG
-                    ? [DragOperation.REORDER, DragOperation.ADD]
-                    : [DragOperation.ADD],
+            onDragStart,
+            onDrop,
+            operation: dragOperation,
             target: DragTarget.ALBUM,
-        },
+        }),
+        [getId, getItem, itemType, onDragStart, onDrop, dragOperation],
+    );
+
+    const { isDragging: isDraggingLocal, ref } = useDragDrop<HTMLDivElement>({
+        drag,
         isEnabled: !!enableDrag && !!data,
     });
 
@@ -715,18 +970,6 @@ const PosterItemCard = ({
     if (data) {
         const navigationPath = getItemNavigationPath(data, itemType);
 
-        const handleMouseEnter = () => {
-            if (withControls) {
-                setShowControls(true);
-            }
-        };
-
-        const handleMouseLeave = () => {
-            if (withControls) {
-                setShowControls(false);
-            }
-        };
-
         const handleContextMenu = (e: React.MouseEvent<HTMLElement>) => {
             if (!data || !controls) {
                 return;
@@ -756,44 +999,6 @@ const PosterItemCard = ({
             e.stopPropagation();
         };
 
-        const imageContainerClassName = clsx(styles.imageContainer, {
-            [styles.isRound]: isRound,
-        });
-
-        const isFavorite =
-            'userFavorite' in data && (data as { userFavorite: boolean }).userFavorite;
-        const userRating =
-            'userRating' in data &&
-            typeof (data as { userRating: null | number }).userRating === 'number'
-                ? (data as { userRating: null | number }).userRating
-                : null;
-        const hasRating = userRating !== null && userRating > 0;
-
-        const imageContainerContent = (
-            <>
-                <ItemImage
-                    className={clsx(styles.image, { [styles.isRound]: isRound })}
-                    id={data?.id}
-                    itemType={itemType}
-                    src={(data as Album | AlbumArtist | Playlist | Song)?.imageUrl}
-                />
-                {isFavorite && <div className={styles.favoriteBadge} />}
-                {hasRating && <div className={styles.ratingBadge}>{userRating}</div>}
-                <AnimatePresence>
-                    {withControls && showControls && data && (
-                        <ItemCardControls
-                            controls={controls}
-                            enableExpansion={enableExpansion}
-                            internalState={internalState}
-                            item={data}
-                            itemType={itemType}
-                            type="poster"
-                        />
-                    )}
-                </AnimatePresence>
-            </>
-        );
-
         return (
             <div
                 className={clsx(styles.container, styles.poster, {
@@ -802,31 +1007,25 @@ const PosterItemCard = ({
                 })}
                 ref={ref}
             >
-                {enableNavigation && navigationPath && !internalState ? (
-                    <Link
-                        className={imageContainerClassName}
-                        draggable={false}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onDragStart={handleLinkDragStart}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                        state={{ item: data }}
-                        to={navigationPath}
-                    >
-                        {imageContainerContent}
-                    </Link>
-                ) : (
-                    <div
-                        className={imageContainerClassName}
-                        onClick={handleImageClick}
-                        onContextMenu={handleContextMenu}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                    >
-                        {imageContainerContent}
-                    </div>
-                )}
+                <ItemCardStandardImageArea
+                    controls={controls}
+                    data={data}
+                    enableExpansion={enableExpansion}
+                    enableNavigation={enableNavigation}
+                    handleContextMenu={handleContextMenu}
+                    handleImageClick={handleImageClick}
+                    handleLinkDragStart={handleLinkDragStart}
+                    imageAsLink={imageAsLink}
+                    imageFetchPriority={imageFetchPriority}
+                    internalState={internalState}
+                    isRound={isRound}
+                    itemType={itemType}
+                    navigationPath={navigationPath}
+                    showFavorite={showFavorite}
+                    showRating={showRating}
+                    variant="poster"
+                    withControls={withControls}
+                />
                 {data && (
                     <div className={styles.detailContainer}>
                         {rows
@@ -860,24 +1059,35 @@ const PosterItemCard = ({
                         (row): row is NonNullable<typeof row> => row !== null && row !== undefined,
                     )
                     .map((row, index) => (
-                        <div
+                        <Text
                             className={clsx(styles.row, {
                                 [styles.muted]: index > 0,
                             })}
                             key={row.id}
+                            size={index > 0 ? 'sm' : 'md'}
                         >
                             &nbsp;
-                        </div>
+                        </Text>
                     ))}
             </div>
         </div>
     );
 };
 
-export const getDataRows = (): DataRow[] => {
+const MemoizedPosterItemCard = memo(PosterItemCard);
+MemoizedPosterItemCard.displayName = 'MemoizedPosterItemCard';
+
+const MemoizedCompactItemCard = memo(CompactItemCard);
+MemoizedCompactItemCard.displayName = 'MemoizedCompactItemCard';
+
+const MemoizedDefaultItemCard = memo(DefaultItemCard);
+MemoizedDefaultItemCard.displayName = 'MemoizedDefaultItemCard';
+
+export const getDataRows = (type?: 'compact' | 'default' | 'poster'): DataRow[] => {
     return [
         {
             format: (data) => {
+                const explicitStatus = 'explicitStatus' in data ? data.explicitStatus : null;
                 if ('name' in data && data.name) {
                     if ('id' in data && data.id) {
                         if ('_itemType' in data) {
@@ -890,6 +1100,7 @@ export const getDataRows = (): DataRow[] => {
                                                 albumId: data.id,
                                             })}
                                         >
+                                            <ExplicitIndicator explicitStatus={explicitStatus} />
                                             {data.name}
                                         </Link>
                                     );
@@ -903,6 +1114,18 @@ export const getDataRows = (): DataRow[] => {
                                                     albumArtistId: data.id,
                                                 },
                                             )}
+                                        >
+                                            <ExplicitIndicator explicitStatus={explicitStatus} />
+                                            {data.name}
+                                        </Link>
+                                    );
+                                case LibraryItem.GENRE:
+                                    return (
+                                        <Link
+                                            state={{ item: data }}
+                                            to={generatePath(AppRoute.LIBRARY_GENRES_DETAIL, {
+                                                genreId: data.id,
+                                            })}
                                         >
                                             {data.name}
                                         </Link>
@@ -919,11 +1142,21 @@ export const getDataRows = (): DataRow[] => {
                                         </Link>
                                     );
                                 default:
-                                    return data.name;
+                                    return (
+                                        <>
+                                            <ExplicitIndicator explicitStatus={explicitStatus} />
+                                            {data.name}
+                                        </>
+                                    );
                             }
                         }
                     }
-                    return data.name;
+                    return (
+                        <>
+                            <ExplicitIndicator explicitStatus={explicitStatus} />
+                            {data.name}
+                        </>
+                    );
                 }
                 return '';
             },
@@ -932,21 +1165,19 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('albumArtists' in data && Array.isArray(data.albumArtists)) {
-                    return (data as Album | Song).albumArtists.map((artist, index) => (
-                        <Fragment key={artist.id}>
-                            <Link
-                                state={{ item: artist }}
-                                to={generatePath(AppRoute.LIBRARY_ALBUM_ARTISTS_DETAIL, {
-                                    albumArtistId: artist.id,
-                                })}
-                            >
-                                {artist.name}
-                            </Link>
-                            {index < (data as Album | Song).albumArtists.length - 1 && (
-                                <Separator />
-                            )}
-                        </Fragment>
-                    ));
+                    return (
+                        <JoinedArtists
+                            artistName={data.albumArtistName}
+                            artists={data.albumArtists}
+                            linkProps={{ fw: 400, isMuted: true }}
+                            rootTextProps={{
+                                className: styles.artistsRow,
+                                fw: 400,
+                                isMuted: type === 'compact' ? false : true,
+                                size: 'sm',
+                            }}
+                        />
+                    );
                 }
                 return '';
             },
@@ -978,7 +1209,7 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('duration' in data && data.duration !== null) {
-                    return formatDuration(data.duration * 1000);
+                    return formatDurationString(data.duration);
                 }
                 return '';
             },
@@ -986,8 +1217,16 @@ export const getDataRows = (): DataRow[] => {
         },
         {
             format: (data) => {
-                if ('releaseYear' in data && data.releaseYear !== null) {
-                    return String(data.releaseYear);
+                if ('releaseYear' in data && data.releaseYear != null) {
+                    const releaseYear = data.releaseYear;
+                    const originalYear =
+                        'originalYear' in data && data.originalYear > 0 ? data.originalYear : null;
+
+                    if (originalYear !== null && originalYear !== releaseYear) {
+                        return `${originalYear}${SEPARATOR_STRING}${releaseYear}`;
+                    }
+
+                    return String(releaseYear);
                 }
                 return '';
             },
@@ -996,11 +1235,37 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('releaseDate' in data && data.releaseDate) {
-                    return data.releaseDate;
+                    if (
+                        'originalDate' in data &&
+                        data.originalDate &&
+                        data.originalDate !== data.releaseDate
+                    ) {
+                        return `${formatPartialIsoDateUTC(data.originalDate)}${SEPARATOR_STRING}${formatPartialIsoDateUTC(data.releaseDate)}`;
+                    }
+
+                    return `${formatPartialIsoDateUTC(data.releaseDate)}`;
                 }
                 return '';
             },
             id: 'releaseDate',
+        },
+        {
+            format: (data) => {
+                if ('year' in data && data.year) {
+                    return String(data.year);
+                }
+                return '';
+            },
+            id: 'year',
+        },
+        {
+            format: (data) => {
+                if ('date' in data && data.date) {
+                    return formatPartialIsoDateUTC(data.date);
+                }
+                return '';
+            },
+            id: 'date',
         },
         {
             format: (data) => {
@@ -1014,7 +1279,12 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('lastPlayedAt' in data && data.lastPlayedAt) {
-                    return formatDateRelative(data.lastPlayedAt);
+                    return (
+                        <Group align="center" gap="xs">
+                            <Icon icon="lastPlayed" size="sm" />
+                            {formatDateRelative(data.lastPlayedAt)}
+                        </Group>
+                    );
                 }
                 return '';
             },
@@ -1023,7 +1293,7 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('playCount' in data && data.playCount !== null) {
-                    return String(data.playCount);
+                    return i18n.t('entity.play', { count: data.playCount });
                 }
                 return '';
             },
@@ -1072,7 +1342,7 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('songCount' in data && data.songCount !== null) {
-                    return String(data.songCount);
+                    return i18n.t('entity.trackWithCount', { count: data.songCount });
                 }
                 return '';
             },
@@ -1081,7 +1351,7 @@ export const getDataRows = (): DataRow[] => {
         {
             format: (data) => {
                 if ('albumCount' in data && data.albumCount !== null) {
-                    return String(data.albumCount);
+                    return i18n.t('entity.albumWithCount', { count: data.albumCount });
                 }
                 return '';
             },
@@ -1115,7 +1385,7 @@ export const getDataRowsCount = () => {
     return getDataRows().length;
 };
 
-const getImageUrl = (data: Album | AlbumArtist | Artist | Playlist | Song | undefined) => {
+const getImageUrl = (data: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined) => {
     if (data && 'imageUrl' in data) {
         return data.imageUrl || undefined;
     }
@@ -1123,8 +1393,23 @@ const getImageUrl = (data: Album | AlbumArtist | Artist | Playlist | Song | unde
     return undefined;
 };
 
+const GenreImagePlaceholder = ({ className, name }: { className?: string; name: string }) => {
+    const { color, isLight } = useMemo(() => stringToColor(name), [name]);
+    return (
+        <div
+            className={className}
+            style={{
+                backgroundColor: color,
+                color: isLight ? '#000' : '#fff',
+            }}
+        >
+            <span className={styles.genrePlaceholderText}>{name}</span>
+        </div>
+    );
+};
+
 const getItemNavigationPath = (
-    data: Album | AlbumArtist | Artist | Playlist | Song | undefined,
+    data: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined,
     itemType: LibraryItem,
 ): null | string => {
     if (!data || !('id' in data) || !data.id) {
@@ -1136,56 +1421,69 @@ const getItemNavigationPath = (
     return getTitlePath(effectiveItemType, data.id);
 };
 
-const ItemCardRow = ({
-    data,
-    index,
-    row,
-    type,
-}: {
-    data: Album | AlbumArtist | Artist | Playlist | Song | undefined;
-    index: number;
-    row: DataRow;
-    type?: 'compact' | 'default' | 'poster';
-}) => {
-    const alignmentClass =
-        row.align === 'center'
-            ? styles['align-center']
-            : row.align === 'end'
-              ? styles['align-end']
-              : styles['align-start'];
+const ItemCardRow = memo(
+    ({
+        data,
+        index,
+        row,
+        type,
+    }: {
+        data: Album | AlbumArtist | Artist | Genre | Playlist | Song | undefined;
+        index: number;
+        row: DataRow;
+        type?: 'compact' | 'default' | 'poster';
+    }) => {
+        const alignmentClass =
+            row.align === 'center'
+                ? styles['align-center']
+                : row.align === 'end'
+                  ? styles['align-end']
+                  : styles['align-start'];
 
-    // All rows except the first one (index 0) should be muted
-    const isMuted = index > 0 || row.isMuted;
+        // All rows except the first one (index 0) should be muted
+        const isMuted = index > 0 || row.isMuted;
+        const isArtistRow = row.id === 'albumArtists' || row.id === 'artists';
 
-    if (!data) {
+        const formattedContent = useMemo(() => {
+            if (!data) {
+                return null;
+            }
+            return row.format(data);
+        }, [data, row]);
+
+        if (!data) {
+            return (
+                <div
+                    className={clsx(styles.row, alignmentClass, {
+                        [styles.compact]: type === 'compact',
+                        [styles.default]: type === 'default',
+                        [styles.muted]: isMuted,
+                        [styles.poster]: type === 'poster',
+                    })}
+                >
+                    &nbsp;
+                </div>
+            );
+        }
+
         return (
-            <div
+            <Text
                 className={clsx(styles.row, alignmentClass, {
+                    [styles.artistsRow]: isArtistRow,
+                    [styles.bold]: index === 0,
                     [styles.compact]: type === 'compact',
                     [styles.default]: type === 'default',
                     [styles.muted]: isMuted,
                     [styles.poster]: type === 'poster',
                 })}
+                size={index > 0 ? 'sm' : 'md'}
             >
-                &nbsp;
-            </div>
+                {formattedContent}
+            </Text>
         );
-    }
+    },
+);
 
-    return (
-        <Text
-            className={clsx(styles.row, alignmentClass, {
-                [styles.bold]: index === 0,
-                [styles.compact]: type === 'compact',
-                [styles.default]: type === 'default',
-                [styles.muted]: isMuted,
-                [styles.poster]: type === 'poster',
-            })}
-            size={index > 0 ? 'sm' : 'md'}
-        >
-            {row.format(data)}
-        </Text>
-    );
-};
+ItemCardRow.displayName = 'ItemCardRow';
 
 export const MemoizedItemCard = memo(ItemCard);

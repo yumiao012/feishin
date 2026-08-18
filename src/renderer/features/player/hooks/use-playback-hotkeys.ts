@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
+import { HotkeyItem, useHotkeys } from '/@/renderer/hooks/use-hotkeys';
 import { useHotkeySettings, usePlayerStore } from '/@/renderer/store';
-import { HotkeyItem, useHotkeys } from '/@/shared/hooks/use-hotkeys';
 
 export const usePlaybackHotkeys = () => {
     const { bindings } = useHotkeySettings();
@@ -14,11 +14,13 @@ export const usePlaybackHotkeys = () => {
             binding: (typeof bindings)[keyof typeof bindings];
             handler: () => void;
         }> = [
-            { binding: bindings.next, handler: () => player.mediaNext() },
+            { binding: bindings.next, handler: () => player.mediaNext(false) },
+            { binding: bindings.nextAlbum, handler: () => player.mediaNext(true) },
             { binding: bindings.pause, handler: () => player.mediaPause() },
             { binding: bindings.play, handler: () => player.mediaPlay() },
             { binding: bindings.playPause, handler: () => player.mediaTogglePlayPause() },
-            { binding: bindings.previous, handler: () => player.mediaPrevious() },
+            { binding: bindings.previous, handler: () => player.mediaPrevious(false) },
+            { binding: bindings.previousAlbum, handler: () => player.mediaPrevious(true) },
             { binding: bindings.skipBackward, handler: () => player.mediaSkipBackward() },
             { binding: bindings.skipForward, handler: () => player.mediaSkipForward() },
             { binding: bindings.stop, handler: () => player.mediaStop() },
@@ -37,4 +39,9 @@ export const usePlaybackHotkeys = () => {
     }, [bindings, player]);
 
     useHotkeys(playbackHotkeysItems);
+};
+
+export const PlaybackHotkeysHook = () => {
+    usePlaybackHotkeys();
+    return null;
 };

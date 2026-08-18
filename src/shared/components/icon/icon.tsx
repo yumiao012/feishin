@@ -1,8 +1,15 @@
 import clsx from 'clsx';
 import { motion } from 'motion/react';
-import { type ComponentType, forwardRef } from 'react';
+import {
+    type ComponentType,
+    type CSSProperties,
+    forwardRef,
+    ImgHTMLAttributes,
+    memo,
+    useMemo,
+} from 'react';
 import { IconBaseProps } from 'react-icons';
-import { FaLastfmSquare } from 'react-icons/fa';
+import { CgSpinnerTwoAlt } from 'react-icons/cg';
 import {
     LuAlignCenter,
     LuAlignLeft,
@@ -20,28 +27,36 @@ import {
     LuArrowUpDown,
     LuArrowUpNarrowWide,
     LuArrowUpToLine,
+    LuAudioLines,
     LuBookOpen,
+    LuBraces,
+    LuCamera,
     LuCheck,
     LuChevronDown,
     LuChevronLast,
     LuChevronLeft,
     LuChevronRight,
+    LuChevronsDownUp,
+    LuChevronsUpDown,
     LuChevronUp,
+    LuCircle,
     LuCircleCheck,
     LuCircleX,
     LuClipboardCopy,
     LuClock3,
     LuCloudDownload,
+    LuCornerDownRight,
     LuCornerUpRight,
-    LuDelete,
     LuDisc,
     LuDisc3,
     LuDownload,
     LuEllipsis,
     LuEllipsisVertical,
+    LuExpand,
     LuExternalLink,
     LuFileJson,
     LuFlag,
+    LuFolderClosed,
     LuFolderOpen,
     LuGauge,
     LuGithub,
@@ -49,20 +64,22 @@ import {
     LuGripVertical,
     LuHardDrive,
     LuHash,
+    LuHeadphones,
     LuHeart,
     LuHeartCrack,
     LuImage,
     LuInfinity,
     LuInfo,
     LuKeyboard,
+    LuLanguages,
     LuLayoutGrid,
+    LuLayoutList,
     LuLibrary,
     LuList,
     LuListFilter,
     LuListMinus,
     LuListMusic,
     LuListPlus,
-    LuLoader,
     LuLock,
     LuLockOpen,
     LuLogIn,
@@ -73,6 +90,9 @@ import {
     LuMoon,
     LuMusic,
     LuMusic2,
+    LuPackage2,
+    LuPanelBottom,
+    LuPanelRight,
     LuPanelRightClose,
     LuPanelRightOpen,
     LuPause,
@@ -101,7 +121,11 @@ import {
     LuStepForward,
     LuSun,
     LuTable,
+    LuTimer,
+    LuTimerOff,
+    LuTrash,
     LuTriangleAlert,
+    LuUndo2,
     LuUpload,
     LuUser,
     LuUserPen,
@@ -111,16 +135,94 @@ import {
     LuVolumeX,
     LuWifi,
     LuWifiOff,
+    LuWrench,
     LuX,
 } from 'react-icons/lu';
 import { MdOutlineVisibility, MdOutlineVisibilityOff } from 'react-icons/md';
 import { PiMouseLeftClickFill, PiMouseRightClickFill } from 'react-icons/pi';
 import { RiPlayListAddLine, RiRepeat2Line, RiRepeatOneLine } from 'react-icons/ri';
-import { SiMusicbrainz } from 'react-icons/si';
 
 import styles from './icon.module.css';
+import lastfmLogoIcon from './lastfm_logo_icon.png';
+import listenbrainzLogoIcon from './listenbrainz_logo_icon.svg';
+import musicbrainzLogoIcon from './musicbrainz_logo_icon.svg';
+import qobuzLogoIcon from './qobuz_logo_icon.png';
+import spotifyLogoIcon from './spotify_logo_icon.svg';
 
 export type AppIconSelection = keyof typeof AppIcon;
+
+type LogoImgProps = ImgHTMLAttributes<HTMLImageElement> & { size?: number | string };
+
+function logoImgStyle(size: number | string | undefined): CSSProperties | undefined {
+    if (size === undefined) return undefined;
+    const dim = typeof size === 'number' ? `${size}px` : size;
+    return { height: dim, width: dim };
+}
+
+const ListenBrainzLogoIcon = forwardRef<HTMLImageElement, LogoImgProps>(
+    ({ className, size, style, ...props }, ref) => (
+        <img
+            alt="ListenBrainz"
+            className={className}
+            ref={ref}
+            src={listenbrainzLogoIcon}
+            style={logoImgStyle(size) ?? style}
+            {...props}
+        />
+    ),
+);
+
+const SpotifyLogoIcon = forwardRef<HTMLImageElement, LogoImgProps>(
+    ({ className, size, style, ...props }, ref) => (
+        <img
+            alt="Spotify"
+            className={className}
+            ref={ref}
+            src={spotifyLogoIcon}
+            style={logoImgStyle(size) ?? style}
+            {...props}
+        />
+    ),
+);
+
+const MusicBrainzLogoIcon = forwardRef<HTMLImageElement, LogoImgProps>(
+    ({ className, size, style, ...props }, ref) => (
+        <img
+            alt="MusicBrainz"
+            className={className}
+            ref={ref}
+            src={musicbrainzLogoIcon}
+            style={logoImgStyle(size) ?? style}
+            {...props}
+        />
+    ),
+);
+
+const QobuzLogoIcon = forwardRef<HTMLImageElement, LogoImgProps>(
+    ({ className, size, style, ...props }, ref) => (
+        <img
+            alt="Qobuz"
+            className={className}
+            ref={ref}
+            src={qobuzLogoIcon}
+            style={logoImgStyle(size) ?? style}
+            {...props}
+        />
+    ),
+);
+
+const LastfmLogoIcon = forwardRef<HTMLImageElement, LogoImgProps>(
+    ({ className, size, style, ...props }, ref) => (
+        <img
+            alt="Last.fm"
+            className={className}
+            ref={ref}
+            src={lastfmLogoIcon}
+            style={logoImgStyle(size) ?? style}
+            {...props}
+        />
+    ),
+);
 
 export const AppIcon = {
     add: LuPlus,
@@ -144,13 +246,20 @@ export const AppIcon = {
     arrowUpS: LuChevronUp,
     arrowUpToLine: LuArrowUpToLine,
     artist: LuUserPen,
+    audioLines: LuAudioLines,
     brandGitHub: LuGithub,
-    brandLastfm: FaLastfmSquare,
-    brandMusicBrainz: SiMusicbrainz,
+    brandLastfm: LastfmLogoIcon,
+    brandListenBrainz: ListenBrainzLogoIcon,
+    brandMusicBrainz: MusicBrainzLogoIcon,
+    brandQobuz: QobuzLogoIcon,
+    brandSpotify: SpotifyLogoIcon,
     cache: LuCloudDownload,
     check: LuCheck,
+    circle: LuCircle,
     clipboardCopy: LuClipboardCopy,
-    delete: LuDelete,
+    collapseAll: LuChevronsDownUp,
+    collection: LuPackage2,
+    delete: LuTrash,
     disc: LuDisc,
     download: LuDownload,
     dragHorizontal: LuGripHorizontal,
@@ -160,23 +269,38 @@ export const AppIcon = {
     edit: LuPencilLine,
     ellipsisHorizontal: LuEllipsis,
     ellipsisVertical: LuEllipsisVertical,
+    emptyAlbumImage: LuDisc3,
+    emptyArtistImage: LuUser,
+    emptyGenreImage: LuFlag,
     emptyImage: LuDisc3,
+    emptyPlaylistImage: LuListMusic,
+    emptySongImage: LuMusic,
     error: LuShieldAlert,
+    expand: LuExpand,
+    expandAll: LuChevronsUpDown,
     externalLink: LuExternalLink,
     favorite: LuHeart,
     fileJson: LuFileJson,
     filter: LuListFilter,
     folder: LuFolderOpen,
+    folderClosed: LuFolderClosed,
     genre: LuFlag,
+    goToItem: LuCornerDownRight,
     hash: LuHash,
     home: LuSquareMenu,
     image: LuImage,
     info: LuInfo,
     itemAlbum: LuDisc3,
     itemSong: LuMusic,
+    json: LuBraces,
     keyboard: LuKeyboard,
+    languages: LuLanguages,
+    lastPlayed: LuHeadphones,
+    layoutDetail: LuLayoutList,
     layoutGrid: LuLayoutGrid,
     layoutList: LuList,
+    layoutPanelBottom: LuPanelBottom,
+    layoutPanelRight: LuPanelRight,
     layoutTable: LuTable,
     library: LuLibrary,
     list: LuList,
@@ -212,6 +336,7 @@ export const AppIcon = {
     playlistAdd: LuListPlus,
     playlistDelete: LuListMinus,
     plus: LuPlus,
+    queryBuilder: LuWrench,
     queue: LuList,
     radio: LuRadio,
     refresh: LuRotateCw,
@@ -224,10 +349,12 @@ export const AppIcon = {
     share: LuShare2,
     signIn: LuLogIn,
     signOut: LuLogOut,
+    sleepTimer: LuTimer,
+    sleepTimerOff: LuTimerOff,
     sort: LuArrowUpDown,
     sortAsc: LuArrowUpNarrowWide,
     sortDesc: LuArrowDownWideNarrow,
-    spinner: LuLoader,
+    spinner: CgSpinnerTwoAlt,
     square: LuSquare,
     squareCheck: LuSquareCheck,
     star: LuStar,
@@ -235,9 +362,11 @@ export const AppIcon = {
     themeDark: LuMoon,
     themeLight: LuSun,
     track: LuMusic2,
+    undo: LuUndo2,
     unfavorite: LuHeartCrack,
     unpin: LuPinOff,
     upload: LuUpload,
+    uploadImage: LuCamera,
     user: LuUser,
     userManage: LuUserRoundCog,
     visibility: MdOutlineVisibility,
@@ -252,14 +381,7 @@ export const AppIcon = {
     xCircle: LuCircleX,
 } as const;
 
-export interface IconProps extends Omit<IconBaseProps, 'color' | 'fill' | 'size'> {
-    animate?: 'pulse' | 'spin';
-    color?: IconColor;
-    fill?: IconColor;
-    icon: keyof typeof AppIcon;
-    size?: '2xl' | '3xl' | '4xl' | '5xl' | 'lg' | 'md' | 'sm' | 'xl' | 'xs' | number | string;
-}
-type IconColor =
+export type IconColor =
     | 'contrast'
     | 'default'
     | 'error'
@@ -269,21 +391,36 @@ type IconColor =
     | 'muted'
     | 'primary'
     | 'success'
+    | 'transparent'
     | 'warn';
 
-export const Icon = forwardRef<HTMLDivElement, IconProps>((props, ref) => {
+export interface IconProps extends Omit<IconBaseProps, 'color' | 'fill' | 'size'> {
+    animate?: 'pulse' | 'spin';
+    color?: IconColor;
+    fill?: IconColor;
+    icon: keyof typeof AppIcon;
+    size?: '2xl' | '3xl' | '4xl' | '5xl' | 'lg' | 'md' | 'sm' | 'xl' | 'xs' | number | string;
+}
+
+const _Icon = forwardRef<HTMLDivElement, IconProps>((props, ref) => {
     const { animate, className, color, fill, icon, size = 'md' } = props;
 
     const IconComponent: ComponentType<any> = AppIcon[icon];
 
-    const classNames = clsx(className, {
-        [styles.fill]: true,
-        [styles.pulse]: animate === 'pulse',
-        [styles.spin]: animate === 'spin',
-        [styles[`color-${color || fill}`]]: color || fill,
-        [styles[`fill-${fill}`]]: fill,
-        [styles[`size-${size}`]]: true,
-    });
+    const colorClassToken = color ?? (fill && fill !== 'transparent' ? fill : undefined);
+
+    const classNames = useMemo(
+        () =>
+            clsx(className, {
+                [styles.fill]: true,
+                [styles.pulse]: animate === 'pulse',
+                [styles.spin]: animate === 'spin',
+                [styles[`color-${colorClassToken}`]]: colorClassToken,
+                [styles[`fill-${fill}`]]: fill,
+                [styles[`size-${size}`]]: true,
+            }),
+        [animate, className, colorClassToken, fill, size],
+    );
 
     return (
         <IconComponent
@@ -294,6 +431,10 @@ export const Icon = forwardRef<HTMLDivElement, IconProps>((props, ref) => {
         />
     );
 });
+
+_Icon.displayName = 'Icon';
+
+export const Icon = memo(_Icon);
 
 Icon.displayName = 'Icon';
 

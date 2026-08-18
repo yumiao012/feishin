@@ -11,8 +11,11 @@ import { defaultTheme } from '/@/shared/themes/default';
 import { defaultDark } from '/@/shared/themes/default-dark/default-dark';
 import { defaultLight } from '/@/shared/themes/default-light/default-light';
 import { dracula } from '/@/shared/themes/dracula/dracula';
+import { everforestDark } from '/@/shared/themes/everforest-dark/everforest-dark';
+import { everforestLight } from '/@/shared/themes/everforest-light/everforest-light';
 import { githubDark } from '/@/shared/themes/github-dark/github-dark';
 import { githubLight } from '/@/shared/themes/github-light/github-light';
+import { glassyDark } from '/@/shared/themes/glassy-dark/glassy-dark';
 import { gruvboxDark } from '/@/shared/themes/gruvbox-dark/gruvbox-dark';
 import { gruvboxLight } from '/@/shared/themes/gruvbox-light/gruvbox-light';
 import { highContrastDark } from '/@/shared/themes/high-contrast-dark/high-contrast-dark';
@@ -23,12 +26,16 @@ import { monokai } from '/@/shared/themes/monokai/monokai';
 import { nightOwl } from '/@/shared/themes/night-owl/night-owl';
 import { nord } from '/@/shared/themes/nord/nord';
 import { oneDark } from '/@/shared/themes/one-dark/one-dark';
+import { rosePineDawn } from '/@/shared/themes/rose-pine-dawn/rose-pine-dawn';
+import { rosePineMoon } from '/@/shared/themes/rose-pine-moon/rose-pine-moon';
+import { rosePine } from '/@/shared/themes/rose-pine/rose-pine';
 import { shadesOfPurple } from '/@/shared/themes/shades-of-purple/shades-of-purple';
 import { solarizedDark } from '/@/shared/themes/solarized-dark/solarized-dark';
 import { solarizedLight } from '/@/shared/themes/solarized-light/solarized-light';
 import { tokyoNight } from '/@/shared/themes/tokyo-night/tokyo-night';
 import { vscodeDarkPlus } from '/@/shared/themes/vscode-dark-plus/vscode-dark-plus';
 import { vscodeLightPlus } from '/@/shared/themes/vscode-light-plus/vscode-light-plus';
+import { zenburn } from '/@/shared/themes/zenburn/zenburn';
 
 export const appTheme: Record<AppTheme, AppThemeConfiguration> = {
     [AppTheme.AYU_DARK]: ayuDark,
@@ -38,8 +45,11 @@ export const appTheme: Record<AppTheme, AppThemeConfiguration> = {
     [AppTheme.DEFAULT_DARK]: defaultDark,
     [AppTheme.DEFAULT_LIGHT]: defaultLight,
     [AppTheme.DRACULA]: dracula,
+    [AppTheme.EVERFOREST_DARK]: everforestDark,
+    [AppTheme.EVERFOREST_LIGHT]: everforestLight,
     [AppTheme.GITHUB_DARK]: githubDark,
     [AppTheme.GITHUB_LIGHT]: githubLight,
+    [AppTheme.GLASSY_DARK]: glassyDark,
     [AppTheme.GRUVBOX_DARK]: gruvboxDark,
     [AppTheme.GRUVBOX_LIGHT]: gruvboxLight,
     [AppTheme.HIGH_CONTRAST_DARK]: highContrastDark,
@@ -50,20 +60,40 @@ export const appTheme: Record<AppTheme, AppThemeConfiguration> = {
     [AppTheme.NIGHT_OWL]: nightOwl,
     [AppTheme.NORD]: nord,
     [AppTheme.ONE_DARK]: oneDark,
+    [AppTheme.ROSE_PINE]: rosePine,
+    [AppTheme.ROSE_PINE_DAWN]: rosePineDawn,
+    [AppTheme.ROSE_PINE_MOON]: rosePineMoon,
     [AppTheme.SHADES_OF_PURPLE]: shadesOfPurple,
     [AppTheme.SOLARIZED_DARK]: solarizedDark,
     [AppTheme.SOLARIZED_LIGHT]: solarizedLight,
     [AppTheme.TOKYO_NIGHT]: tokyoNight,
     [AppTheme.VSCODE_DARK_PLUS]: vscodeDarkPlus,
     [AppTheme.VSCODE_LIGHT_PLUS]: vscodeLightPlus,
+    [AppTheme.ZENBURN]: zenburn,
 };
 
-export const getAppTheme = (theme: AppTheme): AppThemeConfiguration => {
+// Custom themes loaded from disk (see custom-themes-store.ts) are registered
+// here at runtime so getAppTheme can resolve `theme` values that aren't part
+// of the built-in AppTheme enum. Kept separate from `appTheme` above so the
+// built-in theme map stays a plain, statically-known record.
+let customThemeRegistry: Record<string, AppThemeConfiguration> = {};
+
+export const setCustomThemeRegistry = (registry: Record<string, AppThemeConfiguration>) => {
+    customThemeRegistry = registry;
+};
+
+const resolveThemeConfig = (theme: string): AppThemeConfiguration | undefined => {
+    return (appTheme as Record<string, AppThemeConfiguration>)[theme] ?? customThemeRegistry[theme];
+};
+
+export const getAppTheme = (theme: AppTheme | string): AppThemeConfiguration => {
+    const themeConfig = resolveThemeConfig(theme) ?? appTheme[AppTheme.DEFAULT_DARK];
+
     return {
-        app: merge({}, defaultTheme.app, appTheme[theme].app),
-        colors: merge({}, defaultTheme.colors, appTheme[theme].colors),
-        mantineOverride: merge({}, defaultTheme.mantineOverride, appTheme[theme].mantineOverride),
-        mode: appTheme[theme].mode,
-        stylesheets: appTheme[theme].stylesheets,
+        app: merge({}, defaultTheme.app, themeConfig.app),
+        colors: merge({}, defaultTheme.colors, themeConfig.colors),
+        mantineOverride: merge({}, defaultTheme.mantineOverride, themeConfig.mantineOverride),
+        mode: themeConfig.mode,
+        stylesheets: themeConfig.stylesheets,
     };
 };
